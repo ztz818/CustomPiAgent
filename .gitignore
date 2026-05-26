@@ -1,0 +1,15 @@
+# Project resources and large external assets
+/resources/
+/resoures/
+
+# Project-local caches
+/.cache/
+/npm_cache/
+/uv_cache/
+
+# Logs can be generated locally during runs
+/logs/*.log
+
+# Common OS/editor noise
+.DS_Store
+*.swp
