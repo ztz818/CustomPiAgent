@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runNpx } from "@/lib/npx";
+import { findWorkspaceContainingPath } from "@/lib/workspace-config";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,9 @@ export async function POST(req: Request) {
     if (!pkg?.trim()) return NextResponse.json({ error: "package required" }, { status: 400 });
 
     const isGlobal = scope !== "project";
+    if (!isGlobal && (!cwd || !findWorkspaceContainingPath(cwd))) {
+      return NextResponse.json({ error: "Workspace is not authorized" }, { status: 403 });
+    }
     const args = ["skills", "add", pkg.trim(), "-y", "--agent", "pi"];
     if (isGlobal) args.push("-g");
 

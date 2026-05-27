@@ -208,6 +208,18 @@ export function AppShell() {
     setRightPanelOpen(true);
   }, []);
 
+  useEffect(() => {
+    if (!activeCwd) return;
+    const readmePath = `${activeCwd.replace(/[/\\]$/, "")}/README.md`;
+    const tabId = `file:${readmePath}`;
+    setFileTabs((prev) => {
+      if (prev.length > 0 || prev.find((t) => t.id === tabId)) return prev;
+      return [{ id: tabId, label: "README.md", filePath: readmePath }];
+    });
+    setActiveFileTabId((cur) => cur ?? tabId);
+    setRightPanelOpen(true);
+  }, [activeCwd]);
+
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);

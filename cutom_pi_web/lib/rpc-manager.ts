@@ -1,6 +1,10 @@
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { cacheSessionPath } from "./session-reader";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
+import {
+  ensureWorkspaceScaffold,
+  findWorkspaceContainingPath,
+} from "./workspace-config";
 
 // ============================================================================
 // Types
@@ -287,11 +291,14 @@ export async function startRpcSession(
 
   const starting = (async () => {
     const { SessionManager, getAgentDir } = await import("@earendil-works/pi-coding-agent");
+    const workspace = findWorkspaceContainingPath(cwd);
+    if (!workspace) throw new Error(`Workspace is not authorized for cwd: ${cwd}`);
+    ensureWorkspaceScaffold(workspace);
     const agentDir = getAgentDir();
 
     const sessionManager = sessionFile
-      ? SessionManager.open(sessionFile, undefined)
-      : SessionManager.create(cwd, undefined);
+      ? SessionManager.open(sessionFile, undefined, workspace.rootPath)
+      : SessionManager.create(workspace.rootPath);
 
     // Determine which tools to pass based on requested toolNames.
     // Since v0.68.0, createAgentSession expects string[] tool names instead of Tool[] instances.
@@ -303,7 +310,7 @@ export async function startRpcSession(
     }
 
     const { session: inner } = await createAgentSession({
-      cwd,
+      cwd: workspace.rootPath,
       agentDir,
       sessionManager,
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),

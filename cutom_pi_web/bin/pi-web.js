@@ -32,12 +32,34 @@ const { values: cliArgs } = parseArgs({
   options: {
     port:     { type: "string", short: "p" },
     hostname: { type: "string", short: "H" },
+    config:   { type: "string", short: "c" },
   },
   strict: false,
 });
 
-const port     = cliArgs.port     ?? process.env.PORT     ?? "30141";
-const hostname = cliArgs.hostname ?? process.env.HOSTNAME ?? null;
+function readServerConfig(configPath) {
+  if (!configPath || !fs.existsSync(configPath)) return {};
+  const config = {};
+  let section = "";
+  for (const rawLine of fs.readFileSync(configPath, "utf8").split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+#.*$/, "");
+    const top = /^([a-zA-Z][\w-]*):\s*$/.exec(line);
+    if (top) {
+      section = top[1];
+      continue;
+    }
+    if (section !== "server") continue;
+    const match = /^\s+(\w+):\s*(.+)$/.exec(line);
+    if (match) config[match[1]] = match[2].trim().replace(/^["']|["']$/g, "");
+  }
+  return config;
+}
+
+const configPath = cliArgs.config ? path.resolve(cliArgs.config) : process.env.NOVA_CONFIG;
+const serverConfig = readServerConfig(configPath);
+
+const port     = cliArgs.port     ?? process.env.PORT ?? serverConfig.port ?? "30141";
+const hostname = cliArgs.hostname ?? process.env.HOST ?? process.env.HOSTNAME ?? serverConfig.host ?? null;
 
 if (!fs.existsSync(nextDir)) {
   console.error("Build artifacts not found. Please report this issue.");
@@ -52,7 +74,7 @@ if (hostname) nextArgs.push("-H", hostname);
 const child = spawn(process.execPath, [nextBin, ...nextArgs], {
   cwd: pkgDir,
   stdio: ["inherit", "pipe", "inherit"],
-  env: { ...process.env },
+  env: { ...process.env, ...(configPath ? { NOVA_CONFIG: configPath } : {}) },
 });
 
 let browserOpened = false;

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync, writeFileSync } from "fs";
-import { DefaultResourceLoader, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { DefaultResourceLoader, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { findWorkspaceContainingPath, getWorkspaceAgentDir } from "@/lib/workspace-config";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,9 @@ export async function GET(req: Request) {
   if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
 
   try {
-    const loader = new DefaultResourceLoader({ cwd, agentDir: getAgentDir() });
+    const workspace = findWorkspaceContainingPath(cwd);
+    if (!workspace) return NextResponse.json({ error: "Workspace is not authorized" }, { status: 403 });
+    const loader = new DefaultResourceLoader({ cwd: workspace.rootPath, agentDir: getWorkspaceAgentDir(workspace) });
     await loader.reload();
     const { skills, diagnostics } = loader.getSkills();
     return NextResponse.json({ skills, diagnostics });
@@ -28,6 +31,7 @@ export async function PATCH(req: Request) {
     const body = await req.json() as { filePath: string; disableModelInvocation: boolean };
     const { filePath, disableModelInvocation } = body;
     if (!filePath) return NextResponse.json({ error: "filePath required" }, { status: 400 });
+    if (!findWorkspaceContainingPath(filePath)) return NextResponse.json({ error: "Workspace is not authorized" }, { status: 403 });
     if (!existsSync(filePath)) return NextResponse.json({ error: "file not found" }, { status: 404 });
 
     const content = readFileSync(filePath, "utf8");

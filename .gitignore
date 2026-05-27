@@ -6,6 +6,8 @@
 /.cache/
 /npm_cache/
 /uv_cache/
+/workspaces/*/.pi/agent/*
+!/workspaces/*/.pi/agent/.gitkeep
 
 # Logs can be generated locally during runs
 /logs/*.log

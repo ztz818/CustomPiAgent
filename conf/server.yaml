@@ -1,0 +1,19 @@
+server:
+  host: 0.0.0.0
+  port: 13001
+
+auth:
+  defaultUser: admin
+
+storage:
+  dataDir: ./data
+
+users:
+  - id: admin
+    username: admin
+
+workspaces:
+  - id: demo
+    name: Demo Workspace
+    rootPath: ./workspaces/demo
+    users: [admin]

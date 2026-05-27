@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { homedir } from "os";
+import { getAuthorizedWorkspaces } from "@/lib/workspace-config";
 
 export async function GET() {
-  return NextResponse.json({ home: homedir() });
+  return NextResponse.json({ home: getAuthorizedWorkspaces()[0]?.rootPath ?? process.cwd() });
 }

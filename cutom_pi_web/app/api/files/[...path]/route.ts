@@ -5,10 +5,12 @@ import { Readable } from "stream";
 import { createRequire } from "module";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
-import { listAllSessions } from "@/lib/session-reader";
+import { getAuthorizedWorkspaces, ensureWorkspaceScaffold } from "@/lib/workspace-config";
 
 const require = createRequire(import.meta.url);
-const archiver = require("archiver") as typeof import("archiver");
+const { ZipArchive } = require("archiver") as {
+  ZipArchive: new (options?: import("archiver").ArchiverOptions) => import("archiver").Archiver;
+};
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -223,22 +225,10 @@ async function getAllowedRoots(): Promise<Set<string>> {
   const cached = globalThis.__piAllowedRootsCache;
   if (cached && cached.expiresAt > now) return cached.roots;
 
-  const sessions = await listAllSessions();
   const roots = new Set<string>();
-  for (const s of sessions) {
-    if (s.cwd) roots.add(s.cwd);
-  }
-  // Also allow ~/pi-cwd-* directories created by the default-cwd endpoint
-  const home = (await import("os")).homedir();
-  const { readdirSync } = await import("fs");
-  try {
-    for (const name of readdirSync(home)) {
-      if (/^pi-cwd-\d{8}$/.test(name)) {
-        roots.add(path.join(home, name));
-      }
-    }
-  } catch {
-    // ignore if home is unreadable
+  for (const workspace of getAuthorizedWorkspaces()) {
+    ensureWorkspaceScaffold(workspace);
+    roots.add(workspace.rootPath);
   }
 
   globalThis.__piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
@@ -424,7 +414,7 @@ export async function GET(
       if (!stat.isDirectory()) {
         return NextResponse.json({ error: "Not a directory" }, { status: 400 });
       }
-      const archive = archiver("zip", { zlib: { level: 9 } });
+      const archive = new ZipArchive({ zlib: { level: 9 } });
       archive.directory(filePath, false);
       archive.finalize();
       return new Response(Readable.toWeb(archive) as ReadableStream<Uint8Array>, {

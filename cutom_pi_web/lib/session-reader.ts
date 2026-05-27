@@ -2,6 +2,10 @@ import { SessionManager, buildSessionContext as piBuildSessionContext, getAgentD
 import type { SessionEntry, SessionInfo, SessionContext, SessionTreeNode, AssistantMessage } from "./types";
 import type { SessionEntry as PiSessionEntry, SessionInfo as PiSessionInfo } from "@earendil-works/pi-coding-agent";
 import { normalizeToolCalls } from "./normalize";
+import {
+  getAuthorizedWorkspaces,
+  ensureWorkspaceScaffold,
+} from "./workspace-config";
 
 export { getAgentDir };
 
@@ -10,7 +14,11 @@ export function getSessionsDir(): string {
 }
 
 export async function listAllSessions(): Promise<SessionInfo[]> {
-  const piSessions: PiSessionInfo[] = await SessionManager.listAll();
+  const piSessions: PiSessionInfo[] = [];
+  for (const workspace of getAuthorizedWorkspaces()) {
+    ensureWorkspaceScaffold(workspace);
+    piSessions.push(...await SessionManager.list(workspace.rootPath));
+  }
   const pathToId = new Map<string, string>();
   for (const s of piSessions) pathToId.set(s.path, s.id);
 
@@ -187,6 +195,3 @@ export function getLeafId(entries: SessionEntry[]): string | null {
   if (entries.length === 0) return null;
   return entries[entries.length - 1].id;
 }
-
-
-

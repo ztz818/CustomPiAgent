@@ -258,10 +258,21 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onCwdChange?.(selectedCwd);
   }, [selectedCwd, onCwdChange]);
 
+  const handleDefaultCwd = useCallback(async () => {
+    try {
+      const res = await fetch("/api/default-cwd", { method: "POST" });
+      const data = await res.json() as { cwd?: string; error?: string };
+      if (data.cwd) {
+        setSelectedCwd(data.cwd);
+        setDropdownOpen(false);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Auto-select cwd and restore session from URL on first load
   useEffect(() => {
-    if (allSessions.length === 0) return;
-
     if (selectedCwd === null) {
       // If restoring a session, set cwd to match that session
       if (initialSessionId && !restoredRef.current) {
@@ -277,8 +288,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       }
       const cwds = getRecentCwds(allSessions);
       if (cwds.length > 0) setSelectedCwd(cwds[0]);
+      else if (!loading) handleDefaultCwd();
     }
-  }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone]);
+  }, [allSessions, selectedCwd, initialSessionId, onSelectSession, onInitialRestoreDone, loading, handleDefaultCwd]);
 
   const commitCustomPath = useCallback(() => {
     const path = customPathValue.trim();
@@ -289,19 +301,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setCustomPathValue("");
     setDropdownOpen(false);
   }, [customPathValue]);
-
-  const handleDefaultCwd = useCallback(async () => {
-    try {
-      const res = await fetch("/api/default-cwd", { method: "POST" });
-      const data = await res.json() as { cwd?: string; error?: string };
-      if (data.cwd) {
-        setSelectedCwd(data.cwd);
-        setDropdownOpen(false);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
 
   // Close dropdown on outside click
   useEffect(() => {
