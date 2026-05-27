@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
@@ -314,23 +315,32 @@ export function AppShell() {
         }}
       />
 
-      {/* Left sidebar */}
-      <div
-        className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}`}
-        style={{
-          background: "var(--surface-container)",
-          borderRight: "1px solid var(--border)",
-          display: "flex",
-          flexDirection: "column",
-          flexShrink: 0,
-          zIndex: 200,
-        }}
-      >
-        {sidebarContent}
-      </div>
+      <Group orientation="horizontal" style={{ flex: 1, minWidth: 0 }}>
+      {sidebarOpen && (
+        <>
+          <Panel defaultSize="320px" minSize="220px" maxSize="520px">
+            {/* Left sidebar */}
+            <div
+              className="sidebar-container sidebar-open"
+              style={{
+                background: "var(--surface-container)",
+                borderRight: "1px solid var(--border)",
+                display: "flex",
+                flexDirection: "column",
+                height: "100%",
+                zIndex: 200,
+              }}
+            >
+              {sidebarContent}
+            </div>
+          </Panel>
+          <Separator className="resize-handle resize-handle-vertical" />
+        </>
+      )}
 
       {/* Center: chat */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
+      <Panel minSize="320px">
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
         <div ref={topBarRef} style={{
           display: "flex",
@@ -593,11 +603,17 @@ export function AppShell() {
           ) : null}
         </div>
       </div>
+      </Panel>
 
       {/* Right panel: file viewer — always mounted, width animated via CSS */}
+      {rightPanelOpen && (
+        <>
+          <Separator className="resize-handle resize-handle-vertical" />
+          <Panel defaultSize="42%" minSize="240px" maxSize="70%">
       <div
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}`}
+        className="right-panel-container right-panel-open"
         style={{
+          height: "100%",
           display: "flex",
           flexDirection: "column",
           borderLeft: "1px solid var(--border)",
@@ -628,6 +644,10 @@ export function AppShell() {
           )}
         </div>
       </div>
+          </Panel>
+        </>
+      )}
+      </Group>
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {skillsConfigOpen && (activeCwd ?? selectedSession?.cwd ?? newSessionCwd) && (

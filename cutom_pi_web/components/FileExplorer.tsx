@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import { encodeFilePathForApi, getRelativeFilePath, joinFilePath } from "@/lib/file-paths";
 
@@ -29,6 +30,12 @@ interface Props {
 
 const AUTO_REFRESH_INTERVAL_MS = 1000;
 
+interface FileMenuState {
+  x: number;
+  y: number;
+  node: FileNode;
+}
+
 async function fetchEntries(dirPath: string): Promise<FileNode[]> {
   const encoded = encodeFilePathForApi(dirPath);
   const res = await fetch(`/api/files/${encoded}?type=list`);
@@ -44,6 +51,18 @@ async function fetchEntries(dirPath: string): Promise<FileNode[]> {
   }));
 }
 
+async function runJsonAction(url: string, init: RequestInit) {
+  const res = await fetch(url, init);
+  const data = await res.json().catch(() => ({})) as { error?: string };
+  if (!res.ok) throw new Error(data.error ?? `Request failed: ${res.status}`);
+  return data;
+}
+
+function downloadPath(filePath: string, isDir: boolean) {
+  const encoded = encodeFilePathForApi(filePath);
+  window.location.href = `/api/files/${encoded}?type=${isDir ? "download-zip" : "download"}`;
+}
+
 function TreeNode({
   node,
   depth,
@@ -53,6 +72,7 @@ function TreeNode({
   expandedPaths,
   onToggleExpanded,
   refreshKey,
+  onContextMenu,
 }: {
   node: FileNode;
   depth: number;
@@ -62,6 +82,7 @@ function TreeNode({
   expandedPaths: Set<string>;
   onToggleExpanded: (fullPath: string, open: boolean) => void;
   refreshKey?: number | string;
+  onContextMenu: (event: MouseEvent, node: FileNode) => void;
 }) {
   const open = expandedPaths.has(node.fullPath);
   const [children, setChildren] = useState<FileNode[]>(node.children ?? []);
@@ -111,6 +132,7 @@ function TreeNode({
     <div>
       <div
         onClick={handleClick}
+        onContextMenu={(event) => onContextMenu(event, node)}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
@@ -197,7 +219,7 @@ function TreeNode({
       {node.isDir && open && (
         <div>
           {children.map((child) => (
-            <TreeNode key={child.fullPath} node={child} depth={depth + 1} cwd={cwd} onOpenFile={onOpenFile} onAtMention={onAtMention} expandedPaths={expandedPaths} onToggleExpanded={onToggleExpanded} refreshKey={refreshKey} />
+            <TreeNode key={child.fullPath} node={child} depth={depth + 1} cwd={cwd} onOpenFile={onOpenFile} onAtMention={onAtMention} expandedPaths={expandedPaths} onToggleExpanded={onToggleExpanded} refreshKey={refreshKey} onContextMenu={onContextMenu} />
           ))}
           {children.length === 0 && loaded && (
             <div style={{ paddingLeft: 8 + (depth + 1) * 14, fontSize: 11, color: "var(--text-dim)", height: 22, display: "flex", alignItems: "center" }}>
@@ -216,8 +238,10 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
   const [error, setError] = useState<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [autoRefreshKey, setAutoRefreshKey] = useState(0);
+  const [menu, setMenu] = useState<FileMenuState | null>(null);
   const prevCwdRef = useRef<string | null>(null);
   const effectiveRefreshKey = `${refreshKey ?? 0}:${autoRefreshKey}`;
+  const bumpRefresh = useCallback(() => setAutoRefreshKey((key) => key + 1), []);
 
   const handleToggleExpanded = useCallback((fullPath: string, open: boolean) => {
     setExpandedPaths((prev) => {
@@ -225,6 +249,87 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
       if (open) next.add(fullPath); else next.delete(fullPath);
       return next;
     });
+  }, []);
+
+  const createChild = useCallback(async (dirPath: string, type: "mkdir" | "touch") => {
+    const label = type === "mkdir" ? "folder" : "file";
+    const name = window.prompt(`New ${label} name`);
+    if (!name) return;
+    try {
+      const encoded = encodeFilePathForApi(dirPath);
+      await runJsonAction(`/api/files/${encoded}?type=${type}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      bumpRefresh();
+    } catch (e) {
+      window.alert(String(e));
+    }
+  }, [bumpRefresh]);
+
+  const uploadInto = useCallback((dirPath: string) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files ?? []);
+      if (files.length === 0) return;
+      const form = new FormData();
+      for (const file of files) form.append("files", file);
+      form.append("overwrite", "false");
+      try {
+        const encoded = encodeFilePathForApi(dirPath);
+        await runJsonAction(`/api/files/${encoded}?type=upload`, { method: "POST", body: form });
+        bumpRefresh();
+      } catch (e) {
+        window.alert(String(e));
+      }
+    };
+    input.click();
+  }, [bumpRefresh]);
+
+  const renameNode = useCallback(async (node: FileNode) => {
+    const name = window.prompt("Rename to", node.name);
+    if (!name || name === node.name) return;
+    try {
+      const encoded = encodeFilePathForApi(node.fullPath);
+      await runJsonAction(`/api/files/${encoded}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      bumpRefresh();
+    } catch (e) {
+      window.alert(String(e));
+    }
+  }, [bumpRefresh]);
+
+  const deleteNode = useCallback(async (node: FileNode) => {
+    const ok = window.confirm(`Delete ${node.isDir ? "folder" : "file"} "${node.name}"? This cannot be undone.`);
+    if (!ok) return;
+    try {
+      const encoded = encodeFilePathForApi(node.fullPath);
+      await runJsonAction(`/api/files/${encoded}`, { method: "DELETE" });
+      bumpRefresh();
+    } catch (e) {
+      window.alert(String(e));
+    }
+  }, [bumpRefresh]);
+
+  const handleContextMenu = useCallback((event: MouseEvent, node: FileNode) => {
+    event.preventDefault();
+    setMenu({ x: event.clientX, y: event.clientY, node });
+  }, []);
+
+  useEffect(() => {
+    const close = () => setMenu(null);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", close);
+    };
   }, []);
 
   useEffect(() => {
@@ -286,7 +391,12 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
   }
 
   return (
-    <div style={{ padding: "2px 4px" }}>
+    <div style={{ padding: "2px 4px", position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 4px 6px" }}>
+        <button onClick={() => createChild(cwd, "touch")} title="New file" style={toolbarButtonStyle}>+ File</button>
+        <button onClick={() => createChild(cwd, "mkdir")} title="New folder" style={toolbarButtonStyle}>+ Folder</button>
+        <button onClick={() => uploadInto(cwd)} title="Upload files" style={toolbarButtonStyle}>Upload</button>
+      </div>
       {roots.map((node) => (
         <TreeNode
           key={node.fullPath}
@@ -298,6 +408,7 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
           expandedPaths={expandedPaths}
           onToggleExpanded={handleToggleExpanded}
           refreshKey={effectiveRefreshKey}
+          onContextMenu={handleContextMenu}
         />
       ))}
       {roots.length === 0 && (
@@ -305,6 +416,73 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
           No files found
         </div>
       )}
+      {menu && (
+        <div
+          onClick={(event) => event.stopPropagation()}
+          style={{
+            position: "fixed",
+            left: menu.x,
+            top: menu.y,
+            zIndex: 1000,
+            minWidth: 170,
+            padding: 4,
+            background: "var(--bg-panel)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+          }}
+        >
+          {menu.node.isDir && (
+            <>
+              <MenuButton onClick={() => { createChild(menu.node.fullPath, "touch"); setMenu(null); }}>New File</MenuButton>
+              <MenuButton onClick={() => { createChild(menu.node.fullPath, "mkdir"); setMenu(null); }}>New Folder</MenuButton>
+              <MenuButton onClick={() => { uploadInto(menu.node.fullPath); setMenu(null); }}>Upload Here</MenuButton>
+              <MenuDivider />
+            </>
+          )}
+          <MenuButton onClick={() => { renameNode(menu.node); setMenu(null); }}>Rename</MenuButton>
+          <MenuButton onClick={() => { deleteNode(menu.node); setMenu(null); }}>Delete</MenuButton>
+          <MenuButton onClick={() => { downloadPath(menu.node.fullPath, menu.node.isDir); setMenu(null); }}>Download</MenuButton>
+          <MenuButton onClick={() => { navigator.clipboard?.writeText(getRelativeFilePath(menu.node.fullPath, cwd)); setMenu(null); }}>Copy Path</MenuButton>
+        </div>
+      )}
     </div>
   );
+}
+
+const toolbarButtonStyle = {
+  background: "var(--bg-panel)",
+  border: "1px solid var(--border)",
+  borderRadius: 6,
+  color: "var(--text-muted)",
+  cursor: "pointer",
+  fontSize: 11,
+  fontWeight: 600,
+  height: 24,
+  padding: "0 8px",
+};
+
+function MenuButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        width: "100%",
+        background: "transparent",
+        border: "none",
+        borderRadius: 5,
+        color: "var(--text)",
+        cursor: "pointer",
+        fontSize: 12,
+        padding: "7px 9px",
+        textAlign: "left",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function MenuDivider() {
+  return <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />;
 }

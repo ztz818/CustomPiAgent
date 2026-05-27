@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { Readable } from "stream";
+import { createRequire } from "module";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import { listAllSessions } from "@/lib/session-reader";
+
+const require = createRequire(import.meta.url);
+const archiver = require("archiver") as typeof import("archiver");
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -14,6 +19,7 @@ const IGNORED_NAMES = new Set([
 const IGNORED_SUFFIXES = [".pyc"];
 
 const TEXT_PREVIEW_TRUNCATE_BYTES = 512 * 1024;
+const TEXT_WRITE_MAX_BYTES = 2 * 1024 * 1024;
 const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
 const XLSX_MAX_ROWS = 500;
 const XLSX_MAX_COLS = 50;
@@ -64,6 +70,15 @@ function getDocumentMime(filePath: string): string | null {
   return DOCUMENT_EXT_TO_MIME[getExt(filePath)] ?? null;
 }
 
+function isValidChildName(name: string): boolean {
+  const trimmed = name.trim();
+  return trimmed.length > 0 && !trimmed.includes("/") && !trimmed.includes("\\") && !trimmed.includes("\0") && trimmed !== "." && trimmed !== "..";
+}
+
+function contentDispositionName(filePath: string): string {
+  return encodeURIComponent(path.basename(filePath)).replace(/['()]/g, escape);
+}
+
 const EXT_TO_LANGUAGE: Record<string, string> = {
   ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
   mjs: "javascript", cjs: "javascript", py: "python", rb: "ruby",
@@ -78,6 +93,14 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
   env: "bash", gitignore: "bash", txt: "text",
 };
 
+const EDITABLE_TEXT_EXTS = new Set([
+  "txt", "md", "mdx", "json", "jsonl", "yaml", "yml", "toml", "xml",
+  "csv", "html", "htm", "css", "scss", "less", "js", "jsx", "ts", "tsx",
+  "mjs", "cjs", "py", "rb", "go", "rs", "java", "kt", "swift", "c", "cpp",
+  "h", "hpp", "cs", "sh", "bash", "zsh", "fish", "sql", "graphql", "gql",
+  "env", "gitignore",
+]);
+
 function getLanguage(filePath: string): string {
   const base = path.basename(filePath).toLowerCase();
   // Special full-name matches
@@ -86,6 +109,16 @@ function getLanguage(filePath: string): string {
   if (base === "makefile" || base === "gnumakefile") return "makefile";
   const ext = base.split(".").pop() ?? "";
   return EXT_TO_LANGUAGE[ext] ?? "text";
+}
+
+function isEditableTextPath(filePath: string): boolean {
+  const base = path.basename(filePath).toLowerCase();
+  if (base === "dockerfile" || base.startsWith("dockerfile.")) return true;
+  if (base === "makefile" || base === "gnumakefile") return true;
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  if (base === ".gitignore") return true;
+  const ext = base.split(".").pop() ?? "";
+  return EDITABLE_TEXT_EXTS.has(ext);
 }
 
 async function readDocxPreview(filePath: string, stat: fs.Stats) {
@@ -150,6 +183,7 @@ function readTextPreview(filePath: string, stat: fs.Stats) {
       content,
       language,
       size: stat.size,
+      modified: stat.mtime.toISOString(),
       truncated: stat.size > TEXT_PREVIEW_TRUNCATE_BYTES,
       previewBytes: bytesRead,
     });
@@ -269,11 +303,12 @@ function createFileBodyStream(filePath: string, range?: { start: number; end: nu
   });
 }
 
-function streamFile(filePath: string, stat: fs.Stats, contentType: string, rangeHeader: string | null): Response {
+function streamFile(filePath: string, stat: fs.Stats, contentType: string, rangeHeader: string | null, extraHeaders: Record<string, string> = {}): Response {
   const headers = {
     "Content-Type": contentType,
     "Cache-Control": "no-cache",
     "Accept-Ranges": "bytes",
+    ...extraHeaders,
   };
 
   if (!rangeHeader) {
@@ -376,6 +411,31 @@ export async function GET(
       return readTextPreview(filePath, stat);
     }
 
+    if (type === "download") {
+      if (!stat.isFile()) {
+        return NextResponse.json({ error: "Not a file" }, { status: 400 });
+      }
+      return streamFile(filePath, stat, "application/octet-stream", request.headers.get("range"), {
+        "Content-Disposition": `attachment; filename*=UTF-8''${contentDispositionName(filePath)}`,
+      });
+    }
+
+    if (type === "download-zip") {
+      if (!stat.isDirectory()) {
+        return NextResponse.json({ error: "Not a directory" }, { status: 400 });
+      }
+      const archive = archiver("zip", { zlib: { level: 9 } });
+      archive.directory(filePath, false);
+      archive.finalize();
+      return new Response(Readable.toWeb(archive) as ReadableStream<Uint8Array>, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Cache-Control": "no-cache",
+          "Content-Disposition": `attachment; filename*=UTF-8''${contentDispositionName(filePath)}.zip`,
+        },
+      });
+    }
+
     if (type === "watch") {
       if (!stat.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
@@ -454,6 +514,179 @@ export async function GET(
       });
 
     return NextResponse.json({ entries, path: filePath });
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  try {
+    const { path: segments } = await params;
+    const dirPath = filePathFromSegments(segments);
+    const type = request.nextUrl.searchParams.get("type");
+
+    const allowedRoots = await getAllowedRoots();
+    if (!isPathAllowed(dirPath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+      return NextResponse.json({ error: "Target is not a directory" }, { status: 400 });
+    }
+
+    if (type === "mkdir" || type === "touch") {
+      const body = await request.json() as { name?: string; overwrite?: boolean };
+      const name = body.name ?? "";
+      if (!isValidChildName(name)) {
+        return NextResponse.json({ error: "Invalid name" }, { status: 400 });
+      }
+      const target = path.join(dirPath, name);
+      if (!isPathAllowed(target, allowedRoots)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+      if (fs.existsSync(target) && !body.overwrite) {
+        return NextResponse.json({ error: "Already exists", conflict: true }, { status: 409 });
+      }
+      if (type === "mkdir") {
+        fs.mkdirSync(target, { recursive: false });
+      } else {
+        fs.closeSync(fs.openSync(target, body.overwrite ? "w" : "wx"));
+      }
+      return NextResponse.json({ ok: true, path: target });
+    }
+
+    if (type === "upload") {
+      const form = await request.formData();
+      const overwrite = form.get("overwrite") === "true";
+      const files = form.getAll("files").filter((item): item is File => item instanceof File);
+      const conflicts: string[] = [];
+      const uploaded: string[] = [];
+
+      for (const file of files) {
+        if (!isValidChildName(file.name)) {
+          return NextResponse.json({ error: `Invalid file name: ${file.name}` }, { status: 400 });
+        }
+        const target = path.join(dirPath, file.name);
+        if (!isPathAllowed(target, allowedRoots)) {
+          return NextResponse.json({ error: "Access denied" }, { status: 403 });
+        }
+        if (fs.existsSync(target) && !overwrite) {
+          conflicts.push(file.name);
+          continue;
+        }
+        const buffer = Buffer.from(await file.arrayBuffer());
+        fs.writeFileSync(target, buffer, { flag: overwrite ? "w" : "wx" });
+        uploaded.push(target);
+      }
+
+      if (conflicts.length > 0) {
+        return NextResponse.json({ error: "Conflicts", conflict: true, conflicts, uploaded }, { status: 409 });
+      }
+      return NextResponse.json({ ok: true, uploaded });
+    }
+
+    return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  try {
+    const { path: segments } = await params;
+    const filePath = filePathFromSegments(segments);
+    const allowedRoots = await getAllowedRoots();
+    if (!isPathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (!fs.existsSync(filePath)) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    const body = await request.json() as { name?: string; overwrite?: boolean };
+    const name = body.name ?? "";
+    if (!isValidChildName(name)) {
+      return NextResponse.json({ error: "Invalid name" }, { status: 400 });
+    }
+    const target = path.join(path.dirname(filePath), name);
+    if (!isPathAllowed(target, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (fs.existsSync(target) && !body.overwrite) {
+      return NextResponse.json({ error: "Already exists", conflict: true }, { status: 409 });
+    }
+    fs.renameSync(filePath, target);
+    return NextResponse.json({ ok: true, path: target });
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  try {
+    const { path: segments } = await params;
+    const filePath = filePathFromSegments(segments);
+    const allowedRoots = await getAllowedRoots();
+    if (!isPathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (!fs.existsSync(filePath)) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    fs.rmSync(filePath, { recursive: true, force: false });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  try {
+    const { path: segments } = await params;
+    const filePath = filePathFromSegments(segments);
+    const allowedRoots = await getAllowedRoots();
+    if (!isPathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      return NextResponse.json({ error: "Not a file" }, { status: 404 });
+    }
+    if (!isEditableTextPath(filePath)) {
+      return NextResponse.json({ error: "This file type is read-only" }, { status: 415 });
+    }
+
+    const before = fs.statSync(filePath);
+    const body = await request.json() as { content?: string; previousModified?: string };
+    const content = body.content ?? "";
+    if (Buffer.byteLength(content, "utf-8") > TEXT_WRITE_MAX_BYTES) {
+      return NextResponse.json({ error: "File is too large to save (>2MB)" }, { status: 413 });
+    }
+    if (body.previousModified && body.previousModified !== before.mtime.toISOString()) {
+      return NextResponse.json({
+        error: "File changed on disk",
+        conflict: true,
+        modified: before.mtime.toISOString(),
+      }, { status: 409 });
+    }
+
+    fs.writeFileSync(filePath, content, "utf-8");
+    const after = fs.statSync(filePath);
+    return NextResponse.json({
+      ok: true,
+      size: after.size,
+      modified: after.mtime.toISOString(),
+    });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

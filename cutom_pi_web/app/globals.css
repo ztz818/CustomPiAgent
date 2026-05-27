@@ -324,21 +324,18 @@ span.linenumber {
   .sidebar-container {
     position: relative;
     overflow: hidden;
-    transition: width 0.2s ease, min-width 0.2s ease;
   }
   .sidebar-container.sidebar-open {
-    width: 260px;
-    min-width: 260px;
+    width: 100%;
+    min-width: 0;
   }
   .sidebar-container.sidebar-closed {
     width: 0;
     min-width: 0;
     border-right: none !important;
   }
-  /* keep inner content at fixed width so it doesn't reflow during animation */
   .sidebar-container > * {
-    width: 260px;
-    min-width: 260px;
+    min-width: 0;
   }
 }
 
@@ -347,23 +344,42 @@ span.linenumber {
 @media (min-width: 641px) {
   .right-panel-container {
     overflow: hidden;
-    transition: width 0.2s ease, min-width 0.2s ease;
     flex-shrink: 0;
   }
   .right-panel-container.right-panel-open {
-    width: 42%;
-    min-width: 300px;
+    width: 100%;
+    min-width: 0;
   }
   .right-panel-container.right-panel-closed {
     width: 0;
     min-width: 0;
     border-left: none !important;
   }
-  /* keep inner content at fixed width so it doesn't reflow during animation */
   .right-panel-container > * {
-    width: 42vw;
-    min-width: 300px;
+    min-width: 0;
   }
+}
+
+.resize-handle {
+  background: var(--outline-variant);
+  flex-shrink: 0;
+  position: relative;
+  transition: background 0.12s ease;
+}
+
+.resize-handle:hover,
+.resize-handle[data-resize-handle-active] {
+  background: var(--accent);
+}
+
+.resize-handle-vertical {
+  cursor: col-resize;
+  width: 6px;
+}
+
+.resize-handle-horizontal {
+  cursor: row-resize;
+  height: 6px;
 }
 
 /* Mobile sidebar: slide in/out as overlay */

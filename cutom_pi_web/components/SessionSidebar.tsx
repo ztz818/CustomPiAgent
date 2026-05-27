@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import type { SessionInfo } from "@/lib/types";
 import { FileExplorer } from "./FileExplorer";
 
@@ -639,53 +640,60 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
       </div>
 
-      {/* Session list */}
-      <div style={{ padding: "8px 8px 4px", borderBottom: "1px solid var(--outline-variant)", flexShrink: 0 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-dim)" }}>
-          Sessions
-        </div>
-      </div>
-      <div style={{ flex: explorerOpen && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "4px 6px 8px", minHeight: 80 }}>
-        {loading && (
-          <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            Loading...
+      <Group orientation="vertical" style={{ flex: 1, minHeight: 0 }}>
+        <Panel defaultSize={explorerOpen && (selectedCwdProp || selectedCwd) ? 55 : 100} minSize={20}>
+          {/* Session list */}
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div style={{ padding: "8px 8px 4px", borderBottom: "1px solid var(--outline-variant)", flexShrink: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-dim)" }}>
+                Sessions
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "4px 6px 8px", minHeight: 0 }}>
+              {loading && (
+                <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
+                  Loading...
+                </div>
+              )}
+              {error && (
+                <div style={{ padding: "12px 14px", color: "#f87171", fontSize: 12 }}>
+                  {error}
+                </div>
+              )}
+              {!loading && !error && filteredSessions.length === 0 && (
+                <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
+                  No sessions found
+                </div>
+              )}
+              {sessionTree.map((node) => (
+                <SessionTreeItem
+                  key={node.session.id}
+                  node={node}
+                  selectedSessionId={selectedSessionId}
+                  onSelectSession={onSelectSession}
+                  onRenamed={loadSessions}
+                  onSessionDeleted={(id) => {
+                    onSessionDeleted?.(id);
+                    loadSessions();
+                  }}
+                  depth={0}
+                />
+              ))}
+            </div>
           </div>
-        )}
-        {error && (
-          <div style={{ padding: "12px 14px", color: "#f87171", fontSize: 12 }}>
-            {error}
-          </div>
-        )}
-        {!loading && !error && filteredSessions.length === 0 && (
-          <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            No sessions found
-          </div>
-        )}
-        {sessionTree.map((node) => (
-          <SessionTreeItem
-            key={node.session.id}
-            node={node}
-            selectedSessionId={selectedSessionId}
-            onSelectSession={onSelectSession}
-            onRenamed={loadSessions}
-            onSessionDeleted={(id) => {
-              onSessionDeleted?.(id);
-              loadSessions();
-            }}
-            depth={0}
-          />
-        ))}
-      </div>
+        </Panel>
 
-      {/* File Explorer section */}
       {(selectedCwdProp || selectedCwd) && (
+        <>
+        <Separator className="resize-handle resize-handle-horizontal" />
+        <Panel defaultSize={45} minSize={18}>
         <div
           style={{
             borderTop: "1px solid var(--outline-variant)",
             background: "var(--surface-container)",
             display: "flex",
             flexDirection: "column",
-            flex: explorerOpen ? "1 1 0" : "0 0 auto",
+            height: "100%",
             minHeight: 0,
             overflow: "hidden",
           }}
@@ -764,7 +772,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             </div>
           )}
         </div>
+        </Panel>
+        </>
       )}
+      </Group>
     </div>
   );
 }

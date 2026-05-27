@@ -19,6 +19,7 @@ interface FileData {
   content: string;
   language: string;
   size: number;
+  modified?: string;
   truncated?: boolean;
   previewBytes?: number;
 }
@@ -47,6 +48,13 @@ interface XlsxData {
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
 const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "opus", "m4a", "aac", "flac", "weba", "webm"]);
 const PDF_EXTS = new Set(["pdf"]);
+const EDITABLE_TEXT_EXTS = new Set([
+  "txt", "md", "mdx", "json", "jsonl", "yaml", "yml", "toml", "xml",
+  "csv", "html", "htm", "css", "scss", "less", "js", "jsx", "ts", "tsx",
+  "mjs", "cjs", "py", "rb", "go", "rs", "java", "kt", "swift", "c", "cpp",
+  "h", "hpp", "cs", "sh", "bash", "zsh", "fish", "sql", "graphql", "gql",
+  "env", "gitignore",
+]);
 
 function isImagePath(filePath: string): boolean {
   const base = getFileName(filePath);
@@ -64,6 +72,16 @@ function isPdfPath(filePath: string): boolean {
   const base = getFileName(filePath);
   const ext = base.toLowerCase().split(".").pop() ?? "";
   return PDF_EXTS.has(ext);
+}
+
+function isEditableTextPath(filePath: string): boolean {
+  const base = getFileName(filePath).toLowerCase();
+  if (base === "dockerfile" || base.startsWith("dockerfile.")) return true;
+  if (base === "makefile" || base === "gnumakefile") return true;
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  if (base === ".gitignore") return true;
+  const ext = base.split(".").pop() ?? "";
+  return EDITABLE_TEXT_EXTS.has(ext);
 }
 
 type DiffLine =
@@ -707,7 +725,11 @@ function TextFileViewer({ filePath, cwd }: Props) {
   const [wrapLines, setWrapLines] = useState(false);
   const [watching, setWatching] = useState(false);
   const [changeCount, setChangeCount] = useState(0);
+  const [editorContent, setEditorContent] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "dirty" | "saving" | "saved" | "error" | "conflict">("idle");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
+  const dirtyRef = useRef(false);
 
   const fetchContent = useCallback((filePath: string, isRefresh = false) => {
     const encoded = encodeFilePathForApi(filePath);
@@ -724,9 +746,20 @@ function TextFileViewer({ filePath, cwd }: Props) {
             if (prev && "content" in prev && "content" in nextData) setPrevContent(prev.content);
             return nextData;
           });
+          if ("content" in nextData && !dirtyRef.current) {
+            setEditorContent(nextData.content);
+            setSaveStatus("idle");
+            setSaveError(null);
+          }
           setChangeCount((c) => c + 1);
         } else {
           setData(nextData);
+          if ("content" in nextData) {
+            setEditorContent(nextData.content);
+            dirtyRef.current = false;
+            setSaveStatus("idle");
+            setSaveError(null);
+          }
         }
         return nextData;
       })
@@ -747,6 +780,10 @@ function TextFileViewer({ filePath, cwd }: Props) {
     setWrapLines(false);
     setChangeCount(0);
     setWatching(false);
+    setEditorContent("");
+    setSaveStatus("idle");
+    setSaveError(null);
+    dirtyRef.current = false;
 
     if (esRef.current) {
       esRef.current.close();
@@ -767,6 +804,11 @@ function TextFileViewer({ filePath, cwd }: Props) {
     });
 
     es.addEventListener("change", () => {
+      if (dirtyRef.current) {
+        setSaveStatus("conflict");
+        setSaveError("File changed on disk while you have unsaved edits.");
+        return;
+      }
       fetchContent(filePath, true);
     });
 
@@ -783,6 +825,52 @@ function TextFileViewer({ filePath, cwd }: Props) {
       esRef.current = null;
     };
   }, [filePath, fetchContent]);
+
+  useEffect(() => {
+    if (!data || !("content" in data)) return;
+    if (!dirtyRef.current || editorContent === data.content) return;
+    if (data.truncated || !isEditableTextPath(filePath)) return;
+
+    const timeoutId = setTimeout(async () => {
+      setSaveStatus("saving");
+      setSaveError(null);
+      const encoded = encodeFilePathForApi(filePath);
+      try {
+        const res = await fetch(`/api/files/${encoded}?type=write`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: editorContent,
+            previousModified: data.modified,
+          }),
+        });
+        const saved = await res.json() as { error?: string; modified?: string; size?: number };
+        if (!res.ok) {
+          setSaveStatus(res.status === 409 ? "conflict" : "error");
+          setSaveError(saved.error ?? "Save failed");
+          return;
+        }
+        dirtyRef.current = false;
+        setSaveStatus("saved");
+        setData((prev) => {
+          if (!prev || !("content" in prev)) return prev;
+          return {
+            ...prev,
+            content: editorContent,
+            modified: saved.modified ?? prev.modified,
+            size: saved.size ?? prev.size,
+            truncated: false,
+            previewBytes: undefined,
+          };
+        });
+      } catch (e) {
+        setSaveStatus("error");
+        setSaveError(String(e));
+      }
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [data, editorContent, filePath]);
 
   if (loading) {
     return (
@@ -807,9 +895,11 @@ function TextFileViewer({ filePath, cwd }: Props) {
   const isXlsxData = data.kind === "xlsx";
   const isHtml = isTextData && data.language === "html";
   const isMarkdown = isTextData && data.language === "markdown";
-  const lines = isTextData ? data.content.split("\n") : [];
-  const hasDiff = isTextData && prevContent !== null && prevContent !== data.content;
+  const displayedContent = isTextData ? editorContent : "";
+  const lines = isTextData ? displayedContent.split("\n") : [];
+  const hasDiff = isTextData && prevContent !== null && prevContent !== displayedContent;
   const fileTypeLabel = isDocxData ? "docx" : isXlsxData ? "xlsx" : isTextData ? data.language : "file";
+  const editable = isTextData && !data.truncated && isEditableTextPath(filePath);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -836,6 +926,17 @@ function TextFileViewer({ filePath, cwd }: Props) {
         {isTextData && data.truncated && (
           <span style={{ color: "var(--warning)", fontWeight: 600 }}>
             preview first {formatSize(data.previewBytes ?? 0)}
+          </span>
+        )}
+        {editable && (
+          <span
+            title={saveError ?? undefined}
+            style={{
+              color: saveStatus === "error" || saveStatus === "conflict" ? "var(--error)" : saveStatus === "dirty" || saveStatus === "saving" ? "var(--warning)" : saveStatus === "saved" ? "var(--success)" : "var(--text-dim)",
+              fontWeight: saveStatus === "idle" ? 500 : 700,
+            }}
+          >
+            {saveStatus === "dirty" ? "unsaved" : saveStatus === "saving" ? "saving..." : saveStatus === "saved" ? "saved" : saveStatus === "conflict" ? "conflict" : saveStatus === "error" ? "save failed" : "editable"}
           </span>
         )}
 
@@ -972,10 +1073,10 @@ function TextFileViewer({ filePath, cwd }: Props) {
         ) : isXlsxData ? (
           <WorkbookPreview data={data} />
         ) : viewMode === "diff" && hasDiff ? (
-          <DiffView oldContent={prevContent!} newContent={data.content} language={data.language} />
+          <DiffView oldContent={prevContent!} newContent={displayedContent} language={data.language} />
         ) : isHtml && previewMode ? (
           <iframe
-            srcDoc={data.content}
+            srcDoc={displayedContent}
             sandbox="allow-scripts"
             style={{ width: "100%", height: "100%", border: "none", background: "var(--bg)" }}
             title="HTML preview"
@@ -985,8 +1086,34 @@ function TextFileViewer({ filePath, cwd }: Props) {
             className="markdown-body markdown-file-preview"
             style={{ padding: "24px 32px", maxWidth: 800 }}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{data.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedContent}</ReactMarkdown>
           </div>
+        ) : editable ? (
+          <textarea
+            value={editorContent}
+            onChange={(event) => {
+              dirtyRef.current = true;
+              setEditorContent(event.target.value);
+              setSaveStatus("dirty");
+              setSaveError(null);
+            }}
+            spellCheck={false}
+            wrap={wrapLines ? "soft" : "off"}
+            style={{
+              width: "100%",
+              height: "100%",
+              resize: "none",
+              border: "none",
+              outline: "none",
+              background: "var(--bg)",
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 13,
+              lineHeight: 1.6,
+              padding: "12px 16px",
+              whiteSpace: wrapLines ? "pre-wrap" : "pre",
+            }}
+          />
         ) : (
           <SyntaxHighlighter
             language={data.language === "text" ? "plaintext" : data.language}
@@ -1010,7 +1137,7 @@ function TextFileViewer({ filePath, cwd }: Props) {
             codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
             wrapLongLines={wrapLines}
           >
-            {data.content}
+            {displayedContent}
           </SyntaxHighlighter>
         )}
       </div>
