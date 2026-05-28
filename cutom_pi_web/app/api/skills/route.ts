@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { DefaultResourceLoader, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 import { findWorkspaceContainingPath, getWorkspaceAgentDir } from "@/lib/workspace-config";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +15,15 @@ export async function GET(req: Request) {
   if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
 
   try {
-    const workspace = findWorkspaceContainingPath(cwd);
+    const user = await requireCurrentUser();
+    const workspace = findWorkspaceContainingPath(cwd, user.id);
     if (!workspace) return NextResponse.json({ error: "Workspace is not authorized" }, { status: 403 });
     const loader = new DefaultResourceLoader({ cwd: workspace.rootPath, agentDir: getWorkspaceAgentDir(workspace) });
     await loader.reload();
     const { skills, diagnostics } = loader.getSkills();
     return NextResponse.json({ skills, diagnostics });
   } catch (e) {
+    if (e instanceof Error && e.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }
@@ -28,10 +31,11 @@ export async function GET(req: Request) {
 // PATCH /api/skills — toggle disable-model-invocation on a SKILL.md file
 export async function PATCH(req: Request) {
   try {
+    const user = await requireCurrentUser();
     const body = await req.json() as { filePath: string; disableModelInvocation: boolean };
     const { filePath, disableModelInvocation } = body;
     if (!filePath) return NextResponse.json({ error: "filePath required" }, { status: 400 });
-    if (!findWorkspaceContainingPath(filePath)) return NextResponse.json({ error: "Workspace is not authorized" }, { status: 403 });
+    if (!findWorkspaceContainingPath(filePath, user.id)) return NextResponse.json({ error: "Workspace is not authorized" }, { status: 403 });
     if (!existsSync(filePath)) return NextResponse.json({ error: "file not found" }, { status: 404 });
 
     const content = readFileSync(filePath, "utf8");
@@ -56,6 +60,7 @@ export async function PATCH(req: Request) {
     writeFileSync(filePath, updated, "utf8");
     return NextResponse.json({ success: true });
   } catch (e) {
+    if (e instanceof Error && e.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }
 }

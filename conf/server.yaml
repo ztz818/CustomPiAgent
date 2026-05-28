@@ -11,6 +11,7 @@ storage:
 users:
   - id: admin
     username: admin
+    accessCode: admin
 
 workspaces:
   - id: demo

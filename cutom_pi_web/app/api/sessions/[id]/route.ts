@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "fs";
 import { join } from "path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 import {
   resolveSessionPath,
   invalidateSessionPathCache,
@@ -9,6 +10,7 @@ import {
   listAllSessions,
 } from "@/lib/session-reader";
 import { getRpcSession } from "@/lib/rpc-manager";
+import { findWorkspaceContainingPath } from "@/lib/workspace-config";
 
 export async function GET(
   req: Request,
@@ -16,21 +18,26 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
+    const user = await requireCurrentUser();
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
     const sm = SessionManager.open(filePath);
+    const header = sm.getHeader();
+    const cwd = header?.cwd ?? "";
+    if (!findWorkspaceContainingPath(cwd, user.id)) {
+      return NextResponse.json({ error: "Session is not authorized" }, { status: 403 });
+    }
     const entries = sm.getEntries() as never;
     const tree = sm.getTree();
     const leafId = sm.getLeafId();
     const context = buildSessionContext(entries, leafId);
 
-    const header = sm.getHeader();
     let modified = header?.timestamp ?? new Date().toISOString();
     try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }
-    const allSessions = await listAllSessions();
+    const allSessions = await listAllSessions(user.id);
     const parentSessionId = allSessions.find((s) => s.id === id)?.parentSessionId;
     const info = header ? {
       path: filePath,
@@ -72,6 +79,7 @@ export async function GET(
       ...(agentState !== undefined ? { agentState } : {}),
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
@@ -83,6 +91,7 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
+    const user = await requireCurrentUser();
     const { name } = await req.json() as { name?: string };
     if (typeof name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
@@ -92,9 +101,14 @@ export async function PATCH(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
     const sm = SessionManager.open(filePath);
+    const cwd = sm.getHeader()?.cwd ?? "";
+    if (!findWorkspaceContainingPath(cwd, user.id)) {
+      return NextResponse.json({ error: "Session is not authorized" }, { status: 403 });
+    }
     sm.appendSessionInfo(name.trim());
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
@@ -106,9 +120,15 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
+    const user = await requireCurrentUser();
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    const sm = SessionManager.open(filePath);
+    const cwd = sm.getHeader()?.cwd ?? "";
+    if (!findWorkspaceContainingPath(cwd, user.id)) {
+      return NextResponse.json({ error: "Session is not authorized" }, { status: 403 });
     }
 
     // Read header before deleting to get parentSession path
@@ -145,6 +165,7 @@ export async function DELETE(
     invalidateSessionPathCache(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

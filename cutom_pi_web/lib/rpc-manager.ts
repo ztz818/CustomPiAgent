@@ -76,7 +76,13 @@ export class AgentSessionWrapper {
       case "prompt": {
         // Fire and forget — events come via subscribe
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
-        this.inner.prompt(command.message as string, promptImages?.length ? { images: promptImages } : undefined).catch(() => {});
+        this.inner.prompt(command.message as string, promptImages?.length ? { images: promptImages } : undefined).catch((err) => {
+          console.error("[rpc-manager] prompt() failed:", err);
+          // Emit a synthetic agent_end event so the UI doesn't hang
+          for (const l of this.listeners) {
+            l({ type: "agent_end", error: String(err) });
+          }
+        });
         return null;
       }
 
@@ -247,6 +253,7 @@ export class AgentSessionWrapper {
 declare global {
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
+  var __piSessionOwners: Map<string, { userId?: string; cwd: string }> | undefined;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
@@ -265,8 +272,17 @@ function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSes
   return globalThis.__piStartLocks;
 }
 
+function getOwners(): Map<string, { userId?: string; cwd: string }> {
+  if (!globalThis.__piSessionOwners) globalThis.__piSessionOwners = new Map();
+  return globalThis.__piSessionOwners;
+}
+
 export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
   return getRegistry().get(sessionId);
+}
+
+export function getRpcSessionOwner(sessionId: string): { userId?: string; cwd: string } | undefined {
+  return getOwners().get(sessionId);
 }
 
 /**
@@ -278,7 +294,8 @@ export async function startRpcSession(
   sessionId: string,
   sessionFile: string,
   cwd: string,
-  toolNames?: string[]
+  toolNames?: string[],
+  userId?: string
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const registry = getRegistry();
   const locks = getLocks();
@@ -291,7 +308,7 @@ export async function startRpcSession(
 
   const starting = (async () => {
     const { SessionManager, getAgentDir } = await import("@earendil-works/pi-coding-agent");
-    const workspace = findWorkspaceContainingPath(cwd);
+    const workspace = findWorkspaceContainingPath(cwd, userId);
     if (!workspace) throw new Error(`Workspace is not authorized for cwd: ${cwd}`);
     ensureWorkspaceScaffold(workspace);
     const agentDir = getAgentDir();
@@ -335,7 +352,12 @@ export async function startRpcSession(
     const realSessionFile = inner.sessionFile as string | undefined;
     if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
 
-    wrapper.onDestroy(() => registry.delete(realSessionId));
+    getOwners().set(realSessionId, { userId, cwd: workspace.rootPath });
+
+    wrapper.onDestroy(() => {
+      registry.delete(realSessionId);
+      getOwners().delete(realSessionId);
+    });
     registry.set(realSessionId, wrapper);
 
     return { session: wrapper, realSessionId };

@@ -11,19 +11,47 @@ export function useAudio() {
 
   const enabledRef = useRef(enabled);
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const getAudioContext = useCallback(async () => {
+    if (typeof window === "undefined") return null;
+    const existing = audioContextRef.current;
+    if (existing) {
+      if (existing.state === "suspended") {
+        try {
+          await existing.resume();
+        } catch {
+          // ignore resume errors
+        }
+      }
+      return existing;
+    }
+    try {
+      const ctx = new AudioContext();
+      audioContextRef.current = ctx;
+      if (ctx.state === "suspended") {
+        await ctx.resume().catch(() => {});
+      }
+      return ctx;
+    } catch {
+      return null;
+    }
+  }, []);
 
   const toggle = useCallback(() => {
     setEnabled((prev) => {
       const next = !prev;
       localStorage.setItem("pi-sound-enabled", String(next));
+      if (next) void getAudioContext();
       return next;
     });
-  }, []);
+  }, [getAudioContext]);
 
-  const playDone = useCallback(() => {
+  const playDone = useCallback(async () => {
     if (!enabledRef.current) return;
     try {
-      const ctx = new AudioContext();
+      const ctx = await getAudioContext();
+      if (!ctx) return;
       const now = ctx.currentTime;
       const freqs = [523.25, 659.25];
       freqs.forEach((freq, i) => {
@@ -40,10 +68,16 @@ export function useAudio() {
         osc.start(t);
         osc.stop(t + 0.45);
       });
-      setTimeout(() => ctx.close(), 1200);
     } catch {
       // AudioContext not available
     }
+  }, [getAudioContext]);
+
+  useEffect(() => {
+    return () => {
+      void audioContextRef.current?.close().catch(() => {});
+      audioContextRef.current = null;
+    };
   }, []);
 
   return { soundEnabled: enabled, onSoundToggle: toggle, playDoneSound: playDone, soundEnabledRef: enabledRef };

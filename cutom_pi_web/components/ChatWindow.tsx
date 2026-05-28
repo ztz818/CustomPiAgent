@@ -6,7 +6,6 @@ import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { useAgentSession, type AgentPhase } from "@/hooks/useAgentSession";
-import { useAudio } from "@/hooks/useAudio";
 import { useDragDrop } from "@/hooks/useDragDrop";
 
 interface Props {
@@ -98,23 +97,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
     modelsRefreshKey, onBranchDataChange, onSystemPromptChange,
   });
 
-  const { soundEnabled, onSoundToggle, playDoneSound } = useAudio();
-  const playDoneSoundRef = useRef(playDoneSound);
-  playDoneSoundRef.current = playDoneSound;
-  const soundEnabledRef = useRef(soundEnabled);
-  soundEnabledRef.current = soundEnabled;
-
-  // Wrap agent event handler to play sound on agent_end
-  const origHandler = handleAgentEventRef.current;
-  useEffect(() => {
-    handleAgentEventRef.current = (event) => {
-      if (event.type === "agent_end" && soundEnabledRef.current) {
-        playDoneSoundRef.current();
-      }
-      origHandler?.(event);
-    };
-  }, [origHandler, handleAgentEventRef]);
-
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
   const statsKey = sessionStats
@@ -180,8 +162,6 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       availableThinkingLevels={availableThinkingLevels}
       thinkingLevelMap={currentThinkingLevelMap}
       retryInfo={retryInfo}
-      soundEnabled={soundEnabled}
-      onSoundToggle={onSoundToggle}
     />
   );
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 import { runNpx } from "@/lib/npx";
 import { findWorkspaceContainingPath } from "@/lib/workspace-config";
 
@@ -9,11 +10,12 @@ const ANSI_RE = /\x1B\[[0-9;]*m/g;
 // POST /api/skills/install  body: { package: string; scope: "global" | "project"; cwd?: string }
 export async function POST(req: Request) {
   try {
+    const user = await requireCurrentUser();
     const { package: pkg, scope, cwd } = await req.json() as { package?: string; scope?: string; cwd?: string };
     if (!pkg?.trim()) return NextResponse.json({ error: "package required" }, { status: 400 });
 
     const isGlobal = scope !== "project";
-    if (!isGlobal && (!cwd || !findWorkspaceContainingPath(cwd))) {
+    if (!isGlobal && (!cwd || !findWorkspaceContainingPath(cwd, user.id))) {
       return NextResponse.json({ error: "Workspace is not authorized" }, { status: 403 });
     }
     const args = ["skills", "add", pkg.trim(), "-y", "--agent", "pi"];
@@ -33,6 +35,7 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ success: true, output });
   } catch (e: unknown) {
+    if (e instanceof Error && e.message === "Unauthorized") return unauthorizedResponse();
     const err = e as { stdout?: string; stderr?: string; message?: string };
     const output = ((err.stdout ?? "") + (err.stderr ?? "")).replace(ANSI_RE, "");
     return NextResponse.json({ error: output || (err.message ?? String(e)) }, { status: 500 });

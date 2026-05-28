@@ -70,7 +70,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
+  const [toolDropdownRect, setToolDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
+  const [thinkingDropdownRect, setThinkingDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -610,7 +612,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <div ref={thinkingDropdownRef} style={{ position: "relative" }}>
                 <button
                   className="material-chip-button"
-                  onClick={() => !isStreaming && setThinkingDropdownOpen((v) => !v)}
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setThinkingDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
+                    setThinkingDropdownOpen((v) => !v);
+                  }}
                   disabled={isStreaming}
                   title="切换推理强度"
                   style={{
@@ -643,12 +649,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     return mapped != null ? mapped : lvl;
                   })()}</span>
                 </button>
-                {thinkingDropdownOpen && (
+                {thinkingDropdownOpen && thinkingDropdownRect && (
                   <div style={{
-                    position: "absolute", bottom: "calc(100% + 6px)", right: 0,
-                    zIndex: 100, background: "var(--surface)", border: "1px solid var(--outline-variant)",
-                    borderRadius: 12, boxShadow: "var(--shadow-popover)",
-                    overflow: "hidden", minWidth: 180,
+                    position: "fixed",
+                    bottom: window.innerHeight - thinkingDropdownRect.top + 6,
+                    left: thinkingDropdownRect.left,
+                    zIndex: 500,
+                    background: "var(--surface)",
+                    border: "1px solid var(--outline-variant)",
+                    borderRadius: 12,
+                    boxShadow: "var(--shadow-popover)",
+                    overflow: "hidden",
+                    minWidth: thinkingDropdownRect.width,
+                    maxHeight: Math.max(120, Math.min(thinkingDropdownRect.top - 8, (window.visualViewport?.height ?? window.innerHeight) * 0.6)),
+                    overflowY: "auto",
                   }}>
                     {THINKING_LEVELS.filter((lvl) => {
                       if (!availableThinkingLevels) return true;
@@ -696,7 +710,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <div ref={toolDropdownRef} style={{ position: "relative" }}>
                 <button
                   className="material-chip-button"
-                  onClick={() => !isStreaming && setToolDropdownOpen((v) => !v)}
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setToolDropdownRect({ top: rect.top, left: rect.left, width: rect.width });
+                    setToolDropdownOpen((v) => !v);
+                  }}
                   disabled={isStreaming}
                   title="切换工具预设"
                   style={{
@@ -722,12 +740,20 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   </svg>
                   <span>{Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default"}</span>
                 </button>
-                {toolDropdownOpen && (
+                {toolDropdownOpen && toolDropdownRect && (
                   <div style={{
-                    position: "absolute", bottom: "calc(100% + 6px)", right: 0,
-                    zIndex: 100, background: "var(--surface)", border: "1px solid var(--outline-variant)",
-                    borderRadius: 12, boxShadow: "var(--shadow-popover)",
-                    overflow: "hidden", minWidth: 120,
+                    position: "fixed",
+                    bottom: window.innerHeight - toolDropdownRect.top + 6,
+                    left: toolDropdownRect.left,
+                    zIndex: 500,
+                    background: "var(--surface)",
+                    border: "1px solid var(--outline-variant)",
+                    borderRadius: 12,
+                    boxShadow: "var(--shadow-popover)",
+                    overflow: "hidden",
+                    minWidth: toolDropdownRect.width,
+                    maxHeight: Math.max(120, Math.min(toolDropdownRect.top - 8, (window.visualViewport?.height ?? window.innerHeight) * 0.6)),
+                    overflowY: "auto",
                   }}>
                     {TOOL_PRESETS.map((lvl) => {
                       const preset = TOOL_PRESET_MAP[lvl];

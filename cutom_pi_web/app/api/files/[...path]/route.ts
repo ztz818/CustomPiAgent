@@ -5,6 +5,7 @@ import { Readable } from "stream";
 import { createRequire } from "module";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
+import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 import { getAuthorizedWorkspaces, ensureWorkspaceScaffold } from "@/lib/workspace-config";
 
 const require = createRequire(import.meta.url);
@@ -199,7 +200,7 @@ function readTextPreview(filePath: string, stat: fs.Stats) {
 // enough that newly-created cwds appear promptly; stored on globalThis so it
 // survives Next.js hot-reload.
 declare global {
-  var __piAllowedRootsCache: { roots: Set<string>; expiresAt: number } | undefined;
+  var __piAllowedRootsCache: Map<string, { roots: Set<string>; expiresAt: number }> | undefined;
 }
 
 const ALLOWED_ROOTS_TTL_MS = 5_000;
@@ -220,18 +221,22 @@ function filePathFromSegments(segments: string[]): string {
   return "/" + joined.replace(/^\/+/, "");
 }
 
-async function getAllowedRoots(): Promise<Set<string>> {
+async function getAllowedRoots(userId: string): Promise<Set<string>> {
   const now = Date.now();
-  const cached = globalThis.__piAllowedRootsCache;
+  if (!(globalThis.__piAllowedRootsCache instanceof Map)) {
+    globalThis.__piAllowedRootsCache = new Map();
+  }
+  const cache = globalThis.__piAllowedRootsCache;
+  const cached = cache.get(userId);
   if (cached && cached.expiresAt > now) return cached.roots;
 
   const roots = new Set<string>();
-  for (const workspace of getAuthorizedWorkspaces()) {
+  for (const workspace of getAuthorizedWorkspaces(userId)) {
     ensureWorkspaceScaffold(workspace);
     roots.add(workspace.rootPath);
   }
 
-  globalThis.__piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
+  cache.set(userId, { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS });
   return roots;
 }
 
@@ -360,7 +365,8 @@ export async function GET(
     const filePath = filePathFromSegments(segments);
     const type = request.nextUrl.searchParams.get("type") ?? "list";
 
-    const allowedRoots = await getAllowedRoots();
+    const user = await requireCurrentUser();
+    const allowedRoots = await getAllowedRoots(user.id);
     if (!isPathAllowed(filePath, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -505,6 +511,7 @@ export async function GET(
 
     return NextResponse.json({ entries, path: filePath });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
@@ -518,7 +525,8 @@ export async function POST(
     const dirPath = filePathFromSegments(segments);
     const type = request.nextUrl.searchParams.get("type");
 
-    const allowedRoots = await getAllowedRoots();
+    const user = await requireCurrentUser();
+    const allowedRoots = await getAllowedRoots(user.id);
     if (!isPathAllowed(dirPath, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -579,6 +587,7 @@ export async function POST(
 
     return NextResponse.json({ error: "Unsupported action" }, { status: 400 });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
@@ -590,7 +599,8 @@ export async function PATCH(
   try {
     const { path: segments } = await params;
     const filePath = filePathFromSegments(segments);
-    const allowedRoots = await getAllowedRoots();
+    const user = await requireCurrentUser();
+    const allowedRoots = await getAllowedRoots(user.id);
     if (!isPathAllowed(filePath, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -613,6 +623,7 @@ export async function PATCH(
     fs.renameSync(filePath, target);
     return NextResponse.json({ ok: true, path: target });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
@@ -624,7 +635,8 @@ export async function DELETE(
   try {
     const { path: segments } = await params;
     const filePath = filePathFromSegments(segments);
-    const allowedRoots = await getAllowedRoots();
+    const user = await requireCurrentUser();
+    const allowedRoots = await getAllowedRoots(user.id);
     if (!isPathAllowed(filePath, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -634,6 +646,7 @@ export async function DELETE(
     fs.rmSync(filePath, { recursive: true, force: false });
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
@@ -645,7 +658,8 @@ export async function PUT(
   try {
     const { path: segments } = await params;
     const filePath = filePathFromSegments(segments);
-    const allowedRoots = await getAllowedRoots();
+    const user = await requireCurrentUser();
+    const allowedRoots = await getAllowedRoots(user.id);
     if (!isPathAllowed(filePath, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -678,6 +692,7 @@ export async function PUT(
       modified: after.mtime.toISOString(),
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

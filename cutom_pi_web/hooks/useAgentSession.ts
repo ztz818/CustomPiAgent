@@ -212,30 +212,44 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [setToolPresetState]);
 
-  const connectEvents = useCallback((sid: string) => {
+  const connectEvents = useCallback((sid: string): Promise<void> => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
+    let settled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const es = new EventSource(`/api/agent/${encodeURIComponent(sid)}/events`);
     eventSourceRef.current = es;
-    es.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data) as AgentEvent;
-        handleAgentEventRef.current?.(event);
-      } catch {
-        // ignore
-      }
-    };
-    es.onerror = () => {
-      if (eventSourceRef.current === es && agentRunningRef.current) {
-        es.close();
-        eventSourceRef.current = null;
-        setTimeout(() => {
-          if (agentRunningRef.current) connectEvents(sid);
-        }, 1000);
-      }
-    };
+    return new Promise((resolve) => {
+      const markConnected = () => {
+        if (settled) return;
+        settled = true;
+        if (timeoutId) clearTimeout(timeoutId);
+        resolve();
+      };
+      timeoutId = setTimeout(markConnected, 1500);
+      es.onmessage = (e) => {
+        try {
+          const event = JSON.parse(e.data) as AgentEvent;
+          if (event.type === "connected") markConnected();
+          handleAgentEventRef.current?.(event);
+        } catch (err) {
+          console.error("[useAgentSession] Failed to parse event:", err, e.data);
+        }
+      };
+      es.onerror = (err) => {
+        console.error("[useAgentSession] EventSource error for session:", sid, err);
+        markConnected();
+        if (eventSourceRef.current === es && agentRunningRef.current) {
+          es.close();
+          eventSourceRef.current = null;
+          setTimeout(() => {
+            if (agentRunningRef.current) void connectEvents(sid);
+          }, 1000);
+        }
+      };
+    });
   }, []);
 
   useEffect(() => {
@@ -254,6 +268,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentPhase(null);
         setRetryInfo(null);
         dispatch({ type: "end" });
+        // Log error if present
+        if (event.error) {
+          console.error("[useAgentSession] agent_end with error:", event.error);
+        }
         if (sessionIdRef.current) {
           loadSession(sessionIdRef.current);
           fetch(`/api/agent/${encodeURIComponent(sessionIdRef.current)}`)
@@ -362,6 +380,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
             type: "prompt",
             message,
             toolNames,
+            createOnly: true,
             ...(piImages?.length ? { images: piImages } : {}),
             ...(selectedModel ? { provider: selectedModel.provider, modelId: selectedModel.modelId } : {}),
             ...(thinkingLevel !== "auto" ? { thinkingLevel } : {}),
@@ -374,7 +393,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         const result = await res.json() as { sessionId: string };
         const realId = result.sessionId;
         sessionIdRef.current = realId;
-        connectEvents(realId);
+        await connectEvents(realId);
         onSessionCreated?.({
           id: realId,
           path: "",
@@ -385,8 +404,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           messageCount: 1,
           firstMessage: message,
         });
+        await sendAgentCommand(realId, {
+          type: "prompt",
+          message,
+          ...(piImages?.length ? { images: piImages } : {}),
+        });
       } else if (session) {
-        connectEvents(session.id);
+        await connectEvents(session.id);
         await sendAgentCommand(session.id, {
           type: "prompt",
           message,
@@ -568,7 +592,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (agentState.state?.isStreaming) {
             setAgentRunning(true);
             setAgentPhase({ kind: "waiting_model" });
-            connectEvents(session.id);
+            void connectEvents(session.id);
           }
         }
         if (agentState?.state) {

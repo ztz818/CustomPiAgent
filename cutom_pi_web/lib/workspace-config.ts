@@ -4,6 +4,7 @@ import path from "path";
 export interface NovaUser {
   id: string;
   username: string;
+  accessCode?: string;
   passwordHash?: string;
 }
 
@@ -57,8 +58,7 @@ function readConfigText(): string {
   return "";
 }
 
-export function loadServerConfig(): NovaServerConfig {
-  const text = readConfigText();
+export function loadServerConfigFromText(text: string): NovaServerConfig {
   const config: NovaServerConfig = {
     server: {
       host: process.env.HOST || "127.0.0.1",
@@ -90,6 +90,7 @@ export function loadServerConfig(): NovaServerConfig {
     config.users.push({
       id: currentUser.id,
       username: currentUser.username || currentUser.id,
+      accessCode: currentUser.accessCode,
       passwordHash: currentUser.passwordHash,
     });
   };
@@ -179,8 +180,20 @@ export function loadServerConfig(): NovaServerConfig {
   return config;
 }
 
+export function loadServerConfig(): NovaServerConfig {
+  return loadServerConfigFromText(readConfigText());
+}
+
 export function getCurrentUserId(): string {
   return loadServerConfig().auth.defaultUser;
+}
+
+export function authenticateAccessCode(config: NovaServerConfig, username: string, accessCode: string): NovaUser | null {
+  const normalizedUsername = username.trim();
+  if (!normalizedUsername || !accessCode) return null;
+  const user = config.users.find((candidate) => candidate.username === normalizedUsername || candidate.id === normalizedUsername);
+  if (!user?.accessCode || user.accessCode !== accessCode) return null;
+  return user;
 }
 
 export function getAuthorizedWorkspaces(userId = getCurrentUserId()): NovaWorkspace[] {

@@ -16,6 +16,8 @@ import { useTheme } from "@/hooks/useTheme";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
+type CurrentUser = { id: string; username: string };
+
 export function AppShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -30,6 +32,7 @@ export function AppShell() {
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
   const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
 
@@ -43,6 +46,31 @@ export function AppShell() {
     setBranchActiveLeafId(activeLeafId);
     branchLeafChangeFnRef.current = onLeafChange;
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/session/me")
+      .then((response) => {
+        if (response.status === 401) {
+          router.replace("/login");
+          return null;
+        }
+        return response.ok ? response.json() : null;
+      })
+      .then((data) => {
+        if (!cancelled && data?.user) setCurrentUser(data.user);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  const handleLogout = useCallback(async () => {
+    await fetch("/api/session/logout", { method: "POST" }).catch(() => null);
+    router.replace("/login");
+    router.refresh();
+  }, [router]);
 
   const handleBranchLeafChange = useCallback((leafId: string | null) => {
     branchLeafChangeFnRef.current?.(leafId);
@@ -451,6 +479,45 @@ export function AppShell() {
               <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
             </svg>
           </IconButton>
+          {currentUser && (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginLeft: showChat && (sessionStats || contextUsage) ? 6 : "auto",
+              paddingLeft: 8,
+              color: "var(--text-muted)",
+              fontSize: 12,
+              whiteSpace: "nowrap",
+            }}>
+              <span title={currentUser.id}>{currentUser.username}</span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                title="Sign out"
+                style={{
+                  height: 28,
+                  padding: "0 8px",
+                  border: "none",
+                  borderRadius: 8,
+                  background: "transparent",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  fontSize: 12,
+                }}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.background = "var(--bg-hover)";
+                  event.currentTarget.style.color = "var(--text)";
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.background = "transparent";
+                  event.currentTarget.style.color = "var(--text-muted)";
+                }}
+              >
+                Logout
+              </button>
+            </div>
+          )}
           {/* Session stats — right-aligned in top bar */}
           {showChat && (sessionStats || contextUsage) && (() => {
             const t = sessionStats?.tokens;

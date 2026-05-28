@@ -13,9 +13,9 @@ export function getSessionsDir(): string {
   return `${getAgentDir()}/sessions`;
 }
 
-export async function listAllSessions(): Promise<SessionInfo[]> {
+export async function listAllSessions(userId?: string): Promise<SessionInfo[]> {
   const piSessions: PiSessionInfo[] = [];
-  for (const workspace of getAuthorizedWorkspaces()) {
+  for (const workspace of getAuthorizedWorkspaces(userId)) {
     ensureWorkspaceScaffold(workspace);
     piSessions.push(...await SessionManager.list(workspace.rootPath));
   }
