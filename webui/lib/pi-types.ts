@@ -1,4 +1,11 @@
-import type { SessionManager, SettingsManager, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentSession,
+  AgentSessionEvent,
+  SessionManager,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
+
+type ExtensionBindings = Parameters<AgentSession["bindExtensions"]>[0];
 
 export interface ContextUsage {
   percent: number | null;
@@ -33,7 +40,10 @@ export interface AgentSessionLike {
   readonly modelRegistry: { find: (provider: string, modelId: string) => ModelLike | undefined };
   readonly sessionManager: SessionManager;
   readonly settingsManager: SettingsManager;
-  readonly agent: { state?: { systemPrompt?: string; thinkingLevel?: string } };
+  readonly agent: {
+    state?: { systemPrompt?: string; thinkingLevel?: string };
+    waitForIdle?: () => Promise<void>;
+  };
 
   subscribe(listener: (event: AgentSessionEvent) => void): () => void;
   prompt(text: string, options?: { images?: Array<{ type: "image"; data: string; mimeType: string }> }): Promise<void>;
@@ -51,4 +61,6 @@ export interface AgentSessionLike {
   setActiveToolsByName(names: string[]): void;
   abortCompaction(): void;
   getContextUsage(): ContextUsage | undefined;
+  bindExtensions?(bindings: ExtensionBindings): Promise<void>;
+  reload?(): Promise<void>;
 }

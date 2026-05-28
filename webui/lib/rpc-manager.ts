@@ -16,6 +16,7 @@ export interface AgentEvent {
 }
 
 type EventListener = (event: AgentEvent) => void;
+type ExtensionUiType = "info" | "warning" | "error";
 
 // ============================================================================
 // AgentSessionWrapper
@@ -43,12 +44,86 @@ export class AgentSessionWrapper {
     return this._alive;
   }
 
-  start(): void {
+  async start(): Promise<void> {
+    await this.bindExtensions();
     this.unsubscribe = this.inner.subscribe((event: AgentEvent) => {
       this.resetIdleTimer();
       for (const l of this.listeners) l(event);
     });
     this.resetIdleTimer();
+  }
+
+  private async bindExtensions(): Promise<void> {
+    const bindExtensions = (this.inner as {
+      bindExtensions?: (bindings: {
+        uiContext?: Record<string, unknown>;
+        commandContextActions?: Record<string, unknown>;
+        shutdownHandler?: () => void;
+        onError?: (error: { extensionPath: string; event: string; error: string }) => void;
+      }) => Promise<void>;
+    }).bindExtensions;
+
+    if (!bindExtensions) return;
+
+    const uiContext = this.createExtensionUiContext();
+    const commandContextActions = {
+      waitForIdle: () => this.inner.agent?.waitForIdle?.() ?? Promise.resolve(),
+      reload: () => this.inner.reload?.() ?? Promise.resolve(),
+    };
+
+    await bindExtensions.call(this.inner, {
+      uiContext,
+      commandContextActions,
+      shutdownHandler: () => this.destroy(),
+      onError: (error) => {
+        console.error(`[extension:${error.extensionPath}] ${error.event}: ${error.error}`);
+        for (const l of this.listeners) l({ type: "extension_error", ...error });
+      },
+    });
+  }
+
+  private createExtensionUiContext(): Record<string, unknown> {
+    const emitUi = (event: AgentEvent) => {
+      for (const l of this.listeners) l(event);
+    };
+
+    return {
+      select: async () => undefined,
+      confirm: async () => false,
+      input: async () => undefined,
+      notify: (message: string, type?: ExtensionUiType) => {
+        console[type === "error" ? "error" : type === "warning" ? "warn" : "log"](`[extension-ui] ${message}`);
+        emitUi({ type: "extension_ui", method: "notify", message, notifyType: type });
+      },
+      onTerminalInput: () => () => {},
+      setStatus: (key: string, text: string | undefined) => {
+        emitUi({ type: "extension_ui", method: "setStatus", statusKey: key, statusText: text });
+      },
+      setWorkingMessage: () => {},
+      setWorkingVisible: () => {},
+      setWorkingIndicator: () => {},
+      setHiddenThinkingLabel: () => {},
+      setWidget: () => {},
+      setFooter: () => {},
+      setHeader: () => {},
+      setTitle: () => {},
+      custom: async () => undefined,
+      pasteToEditor: () => {},
+      setEditorText: () => {},
+      getEditorText: () => "",
+      editor: async () => undefined,
+      addAutocompleteProvider: () => {},
+      setEditorComponent: () => {},
+      getEditorComponent: () => undefined,
+      theme: {
+        fg: (_name: string, text: string) => text,
+      },
+      getAllThemes: () => [],
+      getTheme: () => undefined,
+      setTheme: () => ({ success: false, error: "Theme switching is not supported in WebUI extension context" }),
+      getToolsExpanded: () => false,
+      setToolsExpanded: () => {},
+    };
   }
 
   private resetIdleTimer(): void {
@@ -288,7 +363,8 @@ export function getRpcSessionOwner(sessionId: string): { userId?: string; cwd: s
 /**
  * Get or create an AgentSession for the given session.
  * For new sessions (sessionFile === ""), pi generates its own id.
- * Pass toolNames to pre-configure active tools (empty array = all tools disabled).
+ * Pass an empty toolNames array to disable all tools. Undefined follows Pi CLI
+ * defaults, including extension-discovered tools such as MCP.
  */
 export async function startRpcSession(
   sessionId: string,
@@ -317,13 +393,9 @@ export async function startRpcSession(
       ? SessionManager.open(sessionFile, undefined, workspace.rootPath)
       : SessionManager.create(workspace.rootPath);
 
-    // Determine which tools to pass based on requested toolNames.
-    // Since v0.68.0, createAgentSession expects string[] tool names instead of Tool[] instances.
-    // Pass all built-in coding tool names by default; for "all off", pass empty array.
-    const allCodingToolNames = ["read", "bash", "edit", "write", "grep", "find", "ls"];
     let toolsOption: string[] | undefined;
     if (toolNames !== undefined) {
-      toolsOption = toolNames.length === 0 ? [] : allCodingToolNames;
+      toolsOption = toolNames.length === 0 ? [] : undefined;
     }
 
     const { session: inner } = await createAgentSession({
@@ -333,7 +405,8 @@ export async function startRpcSession(
       ...(toolsOption !== undefined ? { tools: toolsOption } : {}),
     });
 
-    // If specific tool names were requested (non-empty), narrow active tools now
+    // If specific tool names were requested (non-empty), narrow active tools now.
+    // The current WebUI only sends [] for Off; undefined preserves Pi defaults.
     if (toolNames && toolNames.length > 0) {
       inner.setActiveToolsByName(toolNames);
     }
@@ -346,7 +419,7 @@ export async function startRpcSession(
     }
 
     const wrapper = new AgentSessionWrapper(inner);
-    wrapper.start();
+    await wrapper.start();
 
     const realSessionId = inner.sessionId as string;
     const realSessionFile = inner.sessionFile as string | undefined;

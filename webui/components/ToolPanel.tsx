@@ -12,9 +12,27 @@ export type ToolPreset = "none" | "default" | "full";
 export const PRESET_NONE: string[] = [];
 export const PRESET_DEFAULT: string[] = ["read", "bash", "edit", "write"];
 export const PRESET_FULL: string[] = ["bash", "read", "edit", "write", "grep", "find", "ls"];
+const BUILTIN_TOOL_NAMES = new Set(PRESET_FULL);
+
+export function getToolNamesForNewSession(preset: ToolPreset): string[] | undefined {
+  return preset === "none" ? PRESET_NONE : undefined;
+}
+
+export function getToolNamesForPreset(preset: ToolPreset, tools: ToolEntry[]): string[] {
+  if (preset === "none") return PRESET_NONE;
+  const builtins = preset === "default" ? PRESET_DEFAULT : PRESET_FULL;
+  const activeExtensionTools = tools
+    .filter((tool) => tool.active && !BUILTIN_TOOL_NAMES.has(tool.name))
+    .map((tool) => tool.name);
+  return [...new Set([...builtins, ...activeExtensionTools])];
+}
 
 export function getPresetFromTools(tools: ToolEntry[]): ToolPreset {
-  const active = tools.filter(t => t.active).map(t => t.name).sort().join(",");
+  const active = tools
+    .filter(t => t.active && BUILTIN_TOOL_NAMES.has(t.name))
+    .map(t => t.name)
+    .sort()
+    .join(",");
   if (active === "") return "none";
   if (active === [...PRESET_DEFAULT].sort().join(",")) return "default";
   if (active === [...PRESET_FULL].sort().join(",")) return "full";
