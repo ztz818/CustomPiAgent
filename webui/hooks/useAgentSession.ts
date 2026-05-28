@@ -49,6 +49,26 @@ interface AgentEvent {
   [key: string]: unknown;
 }
 
+function messageContentEquals(a: unknown, b: unknown): boolean {
+  const textA = messageContentText(a);
+  const textB = messageContentText(b);
+  if (textA !== null || textB !== null) return textA === textB;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function messageContentText(content: unknown): string | null {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .map((block) => {
+      if (!block || typeof block !== "object") return "";
+      const record = block as Record<string, unknown>;
+      return record.type === "text" && typeof record.text === "string" ? record.text : "";
+    })
+    .join("");
+  return text || null;
+}
+
 export type AgentPhase =
   | { kind: "waiting_model" }
   | { kind: "running_tools"; tools: { id: string; name: string }[] }
@@ -234,12 +254,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           const event = JSON.parse(e.data) as AgentEvent;
           if (event.type === "connected") markConnected();
           handleAgentEventRef.current?.(event);
-        } catch (err) {
-          console.error("[useAgentSession] Failed to parse event:", err, e.data);
+        } catch {
+          // Ignore malformed SSE payloads.
         }
       };
-      es.onerror = (err) => {
-        console.error("[useAgentSession] EventSource error for session:", sid, err);
+      es.onerror = () => {
         markConnected();
         if (eventSourceRef.current === es && agentRunningRef.current) {
           es.close();
@@ -268,10 +287,6 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentPhase(null);
         setRetryInfo(null);
         dispatch({ type: "end" });
-        // Log error if present
-        if (event.error) {
-          console.error("[useAgentSession] agent_end with error:", event.error);
-        }
         if (sessionIdRef.current) {
           loadSession(sessionIdRef.current);
           fetch(`/api/agent/${encodeURIComponent(sessionIdRef.current)}`)
@@ -287,7 +302,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "message_start":
       case "message_update": {
         const msg = event.message as Partial<AgentMessage> | undefined;
-        if (msg) {
+        if (msg?.role === "assistant") {
           dispatch({ type: "update", message: normalizeToolCalls(msg as AgentMessage) });
         }
         setAgentPhase(null);
@@ -296,7 +311,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       case "message_end": {
         const completed = event.message as AgentMessage | undefined;
         if (completed) {
-          setMessages((prev) => [...prev, normalizeToolCalls(completed)]);
+          setMessages((prev) => {
+            if (
+              completed.role === "user" &&
+              prev.some((msg) => msg.role === "user" && messageContentEquals(msg.content, completed.content))
+            ) {
+              return prev;
+            }
+            return [...prev, normalizeToolCalls(completed)];
+          });
         }
         dispatch({ type: "reset" });
         setAgentPhase({ kind: "waiting_model" });

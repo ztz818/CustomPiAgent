@@ -12,9 +12,16 @@ users:
   - id: admin
     username: admin
     accessCode: admin
+  - id: teacher_li
+    username: Teacher_Li
+    accessCode: Li080415
 
 workspaces:
   - id: demo
     name: Demo Workspace
     rootPath: ./workspaces/demo
     users: [admin]
+  - id: teacher_li
+    name: Teacher Li Workspace
+    rootPath: ./workspaces/teacher_li
+    users: [teacher_li]

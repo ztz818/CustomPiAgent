@@ -1,6 +1,7 @@
 # Project resources and large external assets
 /resources/
 /resoures/
+.resources/
 
 # Project-local caches
 /.cache/
