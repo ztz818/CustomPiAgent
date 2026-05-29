@@ -7,8 +7,19 @@
 /.cache/
 /npm_cache/
 /uv_cache/
+/conf/pi-agent/
 /workspaces/*/.pi/agent/*
 !/workspaces/*/.pi/agent/.gitkeep
+/workspaces/*/uv_cache/
+/workspaces/*/npm_cache/
+
+# Runtime/user data
+/drafts/
+/data/
+/webui/storage/
+/workspaces/*/drafts/
+/workspaces/*/logs/
+/workspaces/*/projects/
 
 # Logs can be generated locally during runs
 /logs/*.log

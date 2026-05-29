@@ -10,7 +10,11 @@ const PUBLIC_PATHS = [
 ];
 
 function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.includes(pathname) || pathname.startsWith("/_next/");
+  return (
+    PUBLIC_PATHS.includes(pathname) ||
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/api/html/")
+  );
 }
 
 export function proxy(request: NextRequest) {

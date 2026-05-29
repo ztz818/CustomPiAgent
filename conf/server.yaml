@@ -1,6 +1,6 @@
 server:
   host: 0.0.0.0
-  port: 13001
+  port: 13000
 
 auth:
   defaultUser: admin
@@ -15,6 +15,12 @@ users:
   - id: teacher_li
     username: Teacher_Li
     accessCode: Li080415
+  - id: ass_fang
+    username: ass_fang
+    accessCode: "2026"
+  - id: doctor_xiaohui
+    username: doctor_xiaohui
+    accessCode: "2026"
 
 workspaces:
   - id: demo
@@ -25,3 +31,11 @@ workspaces:
     name: Teacher Li Workspace
     rootPath: ./workspaces/teacher_li
     users: [teacher_li]
+  - id: ass_fang
+    name: Ass Fang Workspace
+    rootPath: ./workspaces/ass_fang
+    users: [ass_fang]
+  - id: doctor_xiaohui
+    name: Doctor Xiaohui Workspace
+    rootPath: ./workspaces/doctor_xiaohui
+    users: [doctor_xiaohui]
