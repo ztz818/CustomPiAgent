@@ -1,17 +1,18 @@
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
-
-export const dynamic = "force-dynamic";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 
 export async function POST(
   _req: Request,
   { params }: { params: Promise<{ provider: string }> }
 ) {
-  const { provider } = await params;
-  const authStorage = AuthStorage.create();
-  const providers = authStorage.getOAuthProviders();
-  if (!providers.find((p) => p.id === provider)) {
-    return Response.json({ error: `Unknown provider: ${provider}` }, { status: 400 });
+  try {
+    await requireCurrentUser();
+    const { provider } = await params;
+    const runtime = await ModelRuntime.create();
+    await runtime.logout(provider);
+    return Response.json({ ok: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
+    return Response.json({ error: String(error) }, { status: 500 });
   }
-  authStorage.logout(provider);
-  return Response.json({ ok: true });
 }

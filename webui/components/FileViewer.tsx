@@ -4,9 +4,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useTheme } from "@/hooks/useTheme";
+import { MarkdownBody } from "./MarkdownBody";
 import { encodeFilePathForApi, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 
 interface Props {
@@ -1086,7 +1085,7 @@ function TextFileViewer({ filePath, cwd }: Props) {
             className="markdown-body markdown-file-preview"
             style={{ padding: "24px 32px", maxWidth: 800 }}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayedContent}</ReactMarkdown>
+            <MarkdownBody>{displayedContent}</MarkdownBody>
           </div>
         ) : editable ? (
           <textarea

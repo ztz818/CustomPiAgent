@@ -1,45 +1,69 @@
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { NextResponse } from "next/server";
-
-export const dynamic = "force-dynamic";
+import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 
 type Params = { params: Promise<{ provider: string }> };
 
-// GET /api/auth/api-key/[provider] — returns auth status (never returns the actual key)
-export async function GET(_req: Request, { params }: Params) {
-  const { provider } = await params;
-  const authStorage = AuthStorage.create();
-  const registry = ModelRegistry.create(authStorage);
-  const status = registry.getProviderAuthStatus(provider);
-  const displayName = registry.getProviderDisplayName(provider);
-  const models = registry.getAll().filter((m) => m.provider === provider).length;
-  return NextResponse.json({ provider, displayName, configured: status.configured, source: status.source, models });
+async function authorizedRuntime() {
+  await requireCurrentUser();
+  return ModelRuntime.create();
 }
 
-// POST /api/auth/api-key/[provider]  body: { apiKey: string }
-export async function POST(req: Request, { params }: Params) {
-  const { provider } = await params;
+export async function GET(_req: Request, { params }: Params) {
   try {
-    const { apiKey } = await req.json() as { apiKey?: string };
-    if (!apiKey || typeof apiKey !== "string" || !apiKey.trim()) {
-      return NextResponse.json({ error: "apiKey is required" }, { status: 400 });
-    }
-    const authStorage = AuthStorage.create();
-    authStorage.set(provider, { type: "api_key", key: apiKey.trim() });
-    return NextResponse.json({ success: true });
+    const { provider } = await params;
+    const runtime = await authorizedRuntime();
+    const status = runtime.getProviderAuthStatus(provider);
+    const displayName = runtime.getProvider(provider)?.name ?? provider;
+    return NextResponse.json({
+      provider,
+      displayName,
+      configured: status.configured,
+      source: status.source,
+      models: runtime.getModels(provider).length,
+    });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
 
-// DELETE /api/auth/api-key/[provider] — removes stored API key
-export async function DELETE(_req: Request, { params }: Params) {
-  const { provider } = await params;
+export async function POST(req: Request, { params }: Params) {
   try {
-    const authStorage = AuthStorage.create();
-    authStorage.remove(provider);
+    const { provider } = await params;
+    const { apiKey } = await req.json() as { apiKey?: string };
+    if (!apiKey?.trim()) return NextResponse.json({ error: "apiKey is required" }, { status: 400 });
+    const runtime = await authorizedRuntime();
+    let submitted = false;
+    await runtime.login(provider, "api_key", {
+      notify: () => undefined,
+      prompt: async (prompt) => {
+        if (prompt.type === "select") {
+          const option = prompt.options.find((item) => item.id === "api-key" || item.id === "bearer-token");
+          if (option) return option.id;
+        }
+        if (!submitted && prompt.type === "secret") {
+          submitted = true;
+          return apiKey.trim();
+        }
+        throw new Error(`${provider} requires additional authentication settings`);
+      },
+    });
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
+    return NextResponse.json({ error: String(error) }, { status: 500 });
+  }
+}
+
+export async function DELETE(_req: Request, { params }: Params) {
+  try {
+    const { provider } = await params;
+    const runtime = await authorizedRuntime();
+    await runtime.logout(provider);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }

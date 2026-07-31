@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runNpx } from "@/lib/npx";
+import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +96,7 @@ function parseInstallCount(installs: string): number {
 // POST /api/skills/search  body: { query: string, limit?: number }
 export async function POST(req: Request) {
   try {
+    await requireCurrentUser();
     const { query, limit: rawLimit } = await req.json() as { query?: string; limit?: unknown };
     if (!query?.trim()) return NextResponse.json({ error: "query required" }, { status: 400 });
     const limit = parseLimit(rawLimit);
@@ -112,6 +114,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ results });
     }
   } catch (e: unknown) {
+    if (e instanceof Error && e.message === "Unauthorized") return unauthorizedResponse();
     const err = e as { stdout?: string; stderr?: string; message?: string };
     const raw = (err.stdout ?? "") + (err.stderr ?? "");
     const results = raw ? parseSearchOutput(raw) : [];

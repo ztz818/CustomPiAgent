@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireCurrentUser, unauthorizedResponse } from '@/lib/auth-lite';
 
 function serviceBaseUrl(): string | null {
   const value = process.env.HTML_PREVIEW_SERVICE_URL || process.env.NEXT_PUBLIC_HTML_PREVIEW_SERVICE_URL;
@@ -28,10 +29,16 @@ async function proxyJson(path: string, init: RequestInit) {
  * 配置：HTML_PREVIEW_SERVICE_URL=http://127.0.0.1:18080
  */
 export async function POST(request: NextRequest) {
-  const body = await request.text();
-  return proxyJson('/api/html/upload', {
-    method: 'POST',
-    headers: { 'Content-Type': request.headers.get('Content-Type') || 'application/json' },
-    body,
-  });
+  try {
+    await requireCurrentUser();
+    const body = await request.text();
+    return proxyJson('/api/html/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': request.headers.get('Content-Type') || 'application/json' },
+      body,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') return unauthorizedResponse();
+    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+  }
 }

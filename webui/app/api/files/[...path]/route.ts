@@ -7,6 +7,7 @@ import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 import { getAuthorizedWorkspaces, ensureWorkspaceScaffold } from "@/lib/workspace-config";
+import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 
 const require = createRequire(import.meta.url);
 const { ZipArchive } = require("archiver") as {
@@ -24,6 +25,9 @@ const IGNORED_SUFFIXES = [".pyc"];
 const TEXT_PREVIEW_TRUNCATE_BYTES = 512 * 1024;
 const TEXT_WRITE_MAX_BYTES = 2 * 1024 * 1024;
 const IMAGE_PREVIEW_MAX_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL_BYTES = 100 * 1024 * 1024;
+const MAX_UPLOAD_REQUEST_BYTES = MAX_UPLOAD_TOTAL_BYTES + 1024 * 1024;
 const XLSX_MAX_ROWS = 500;
 const XLSX_MAX_COLS = 50;
 
@@ -556,9 +560,23 @@ export async function POST(
     }
 
     if (type === "upload") {
-      const form = await request.formData();
+      let form: FormData;
+      try {
+        form = await parseFormDataWithinLimit(request, MAX_UPLOAD_REQUEST_BYTES);
+      } catch (error) {
+        if (error instanceof RequestBodyTooLargeError) {
+          return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
+        }
+        throw error;
+      }
       const overwrite = form.get("overwrite") === "true";
       const files = form.getAll("files").filter((item): item is File => item instanceof File);
+      if (files.some((file) => file.size > MAX_UPLOAD_FILE_BYTES)) {
+        return NextResponse.json({ error: "Each upload must be 25MB or smaller" }, { status: 413 });
+      }
+      if (files.reduce((total, file) => total + file.size, 0) > MAX_UPLOAD_TOTAL_BYTES) {
+        return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
+      }
       const conflicts: string[] = [];
       const uploaded: string[] = [];
 

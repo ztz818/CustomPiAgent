@@ -1,6 +1,7 @@
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { cacheSessionPath } from "./session-reader";
 import type { AgentSessionLike, ToolInfo } from "./pi-types";
+import { validateAgentImages } from "./image-attachments";
 import {
   ensureWorkspaceScaffold,
   findWorkspaceContainingPath,
@@ -146,6 +147,10 @@ export class AgentSessionWrapper {
   async send(command: Record<string, unknown>): Promise<unknown> {
     this.resetIdleTimer();
     const type = command.type as string;
+    if (type === "prompt" || type === "steer" || type === "follow_up") {
+      const imageError = validateAgentImages(command.images);
+      if (imageError) throw new Error(imageError);
+    }
 
     switch (type) {
       case "prompt": {
@@ -188,8 +193,11 @@ export class AgentSessionWrapper {
 
       case "set_model": {
         const { provider, modelId } = command as { provider: string; modelId: string };
-        const registry = this.inner.modelRegistry;
-        const model = registry.find(provider, modelId);
+        let model = this.inner.modelRuntime.getModel(provider, modelId);
+        if (!model) {
+          await this.inner.modelRuntime.refresh({ allowNetwork: false });
+          model = this.inner.modelRuntime.getModel(provider, modelId);
+        }
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
         await this.inner.setModel(model);
         return { id: model.id, provider: model.provider };

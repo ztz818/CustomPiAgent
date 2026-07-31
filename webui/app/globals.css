@@ -191,6 +191,25 @@ pre, code {
 }
 .markdown-body th { background: var(--bg-panel); font-weight: 600; }
 .markdown-body hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.markdown-body .katex-display {
+  margin: 0.6em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+.markdown-body .katex { font-size: 1.05em; }
+.mermaid-block {
+  padding: 12px;
+  overflow-x: auto;
+  background: var(--bg);
+}
+.mermaid-block svg { display: block; max-width: none; }
+.mermaid-block-loading { min-height: 120px; }
+.mermaid-block-error {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
 
 .chat-input-toolbar {
   scrollbar-width: none;

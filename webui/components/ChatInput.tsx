@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useRef, useState, useCallback, useEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
+import { clearDraft, getDraft, setDraft, type ChatDraftImage } from "@/lib/draft-store";
+import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attachments";
 
 export interface AttachedImage {
   data: string;   // base64, no prefix
@@ -35,8 +37,10 @@ interface Props {
   availableThinkingLevels?: string[] | null;
   thinkingLevelMap?: Record<string, string | null> | null;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
+  inputHistory?: string[];
   soundEnabled?: boolean;
   onSoundToggle?: () => void;
+  draftKey?: string;
 }
 
 export interface ChatInputHandle {
@@ -47,6 +51,19 @@ export interface ChatInputHandle {
 
 const TOOL_PRESETS = ["off", "default", "full"] as const;
 const TOOL_PRESET_MAP: Record<"off" | "default" | "full", "none" | "default" | "full"> = { off: "none", default: "default", full: "full" };
+const COMPOSITION_END_ENTER_GRACE_MS = 100;
+
+function imageToDraftImage(image: AttachedImage): ChatDraftImage {
+  return { data: image.data, mimeType: image.mimeType };
+}
+
+function draftImageToAttachedImage(image: ChatDraftImage): AttachedImage {
+  return { ...image, previewUrl: `data:${image.mimeType};base64,${image.data}` };
+}
+
+function revokeImagePreview(image: AttachedImage): void {
+  if (image.previewUrl.startsWith("blob:")) URL.revokeObjectURL(image.previewUrl);
+}
 
 const THINKING_LEVELS = ["auto", "off", "minimal", "low", "medium", "high", "xhigh"] as const;
 const THINKING_LEVEL_DESC: Record<typeof THINKING_LEVELS[number], string> = {
@@ -64,16 +81,21 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onCompact, onAbortCompaction, isCompacting, compactError, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo,
+  inputHistory = [],
   soundEnabled, onSoundToggle,
+  draftKey,
 }: Props, ref) {
-  const [value, setValue] = useState("");
+  const initialDraft = draftKey ? getDraft(draftKey) : null;
+  const [value, setValue] = useState(initialDraft?.value ?? "");
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [modelDropdownRect, setModelDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [toolDropdownRect, setToolDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [thinkingDropdownRect, setThinkingDropdownRect] = useState<{ top: number; left: number; width: number } | null>(null);
-  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>(() => initialDraft?.images.map(draftImageToAttachedImage) ?? []);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -81,6 +103,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isComposingRef = useRef(false);
+  const lastCompositionEndAtRef = useRef(0);
+  const draftKeyRef = useRef(draftKey);
+  const historyScratchRef = useRef("");
 
   useImperativeHandle(ref, () => ({
     insertIfEmpty(text: string) {
@@ -123,8 +149,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }));
 
   const processImageFiles = useCallback(async (files: File[]) => {
-    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    setAttachmentError(null);
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
     if (!imageFiles.length) return;
+    if (attachedImages.length + imageFiles.length > MAX_ATTACHED_IMAGES) {
+      setAttachmentError(`每条消息最多添加 ${MAX_ATTACHED_IMAGES} 张图片`);
+      return;
+    }
+    const oversized = imageFiles.find((file) => file.size > MAX_ATTACHED_IMAGE_BYTES);
+    if (oversized) {
+      setAttachmentError(`图片 ${oversized.name} 超过 10MB`);
+      return;
+    }
     const newImages = await Promise.all(
       imageFiles.map(
         (file) =>
@@ -132,7 +168,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             const reader = new FileReader();
             reader.onload = () => {
               const result = reader.result as string;
-              // result is "data:<mime>;base64,<data>"
               const base64 = result.split(",")[1];
               resolve({ data: base64, mimeType: file.type, previewUrl: URL.createObjectURL(file) });
             };
@@ -142,35 +177,59 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       )
     );
     setAttachedImages((prev) => [...prev, ...newImages]);
-  }, []);
+  }, [attachedImages.length]);
 
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
       const next = [...prev];
-      URL.revokeObjectURL(next[index].previewUrl);
-      next.splice(index, 1);
+      const [removed] = next.splice(index, 1);
+      if (removed) revokeImagePreview(removed);
       return next;
     });
   }, []);
 
   const clearImages = useCallback(() => {
     setAttachedImages((prev) => {
-      prev.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+      prev.forEach(revokeImagePreview);
       return [];
     });
   }, []);
+
+  const clearInput = useCallback(() => {
+    setValue("");
+    setHistoryIndex(null);
+    historyScratchRef.current = "";
+    setAttachmentError(null);
+    if (draftKey) clearDraft(draftKey);
+    clearImages();
+    if (textareaRef.current) textareaRef.current.style.height = "auto";
+  }, [clearImages, draftKey]);
+
+  useEffect(() => {
+    if (!draftKey || draftKeyRef.current !== draftKey) return;
+    setDraft(draftKey, { value, images: attachedImages.map(imageToDraftImage) });
+  }, [attachedImages, draftKey, value]);
+
+  useEffect(() => {
+    if (draftKeyRef.current === draftKey) return;
+    const draft = draftKey ? getDraft(draftKey) : null;
+    draftKeyRef.current = draftKey;
+    setValue(draft?.value ?? "");
+    setHistoryIndex(null);
+    historyScratchRef.current = "";
+    setAttachedImages((prev) => {
+      prev.forEach(revokeImagePreview);
+      return draft?.images.map(draftImageToAttachedImage) ?? [];
+    });
+  }, [draftKey]);
 
   const handleSend = useCallback(() => {
     const msg = value.trim();
     if (!msg && !attachedImages.length) return;
     if (isStreaming) return;
     onSend(msg, attachedImages.length ? attachedImages : undefined);
-    setValue("");
-    clearImages();
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-  }, [value, attachedImages, isStreaming, onSend, clearImages]);
+    clearInput();
+  }, [value, attachedImages, isStreaming, onSend, clearInput]);
 
   const sendQueued = useCallback((mode: "steer" | "followup") => {
     const msg = value.trim();
@@ -180,24 +239,51 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     } else if (mode === "followup" && onFollowUp) {
       onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
     }
-    setValue("");
-    clearImages();
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-  }, [value, attachedImages, onSteer, onFollowUp, clearImages]);
+    clearInput();
+  }, [value, attachedImages, onSteer, onFollowUp, clearInput]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      const nativeEvent = e.nativeEvent;
+      const recentlyComposed = Date.now() - lastCompositionEndAtRef.current < COMPOSITION_END_ENTER_GRACE_MS;
+      const isComposing = isComposingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229;
+      if (e.key === "Enter" && !e.shiftKey && (isComposing || recentlyComposed)) {
+        if (recentlyComposed) e.preventDefault();
+        return;
+      }
+      if (!isComposing && !isStreaming && inputHistory.length > 0 && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        if (historyIndex !== null || (e.key === "ArrowUp" && value.length === 0)) {
+          e.preventDefault();
+          let nextIndex: number | null = historyIndex;
+          if (e.key === "ArrowUp") {
+            if (historyIndex === null) historyScratchRef.current = value;
+            nextIndex = historyIndex === null ? inputHistory.length - 1 : Math.max(0, historyIndex - 1);
+          } else if (historyIndex !== null) {
+            nextIndex = historyIndex + 1 >= inputHistory.length ? null : historyIndex + 1;
+          }
+          const nextValue = nextIndex === null ? historyScratchRef.current : inputHistory[nextIndex];
+          setHistoryIndex(nextIndex);
+          setValue(nextValue);
+          requestAnimationFrame(() => {
+            const ta = textareaRef.current;
+            if (!ta) return;
+            ta.setSelectionRange(nextValue.length, nextValue.length);
+            ta.style.height = "auto";
+            ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+          });
+          return;
+        }
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         if (isStreaming && (onSteer || onFollowUp)) {
-          // Default Enter sends as steer if available, else followup
           sendQueued(onSteer ? "steer" : "followup");
         } else {
           handleSend();
         }
       }
     },
-    [isStreaming, onSteer, onFollowUp, sendQueued, handleSend]
+    [historyIndex, inputHistory, isStreaming, onSteer, onFollowUp, sendQueued, handleSend, value]
   );
 
   const handleInput = useCallback(() => {
@@ -302,7 +388,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             Retrying ({retryInfo.attempt}/{retryInfo.maxAttempts})…{retryInfo.errorMessage && <span style={{ opacity: 0.7, marginLeft: 4 }}>— {retryInfo.errorMessage}</span>}
           </div>
         )}
-        {compactError && (
+        {(compactError || attachmentError) && (
           <div style={{
             marginBottom: 8, padding: "5px 10px",
             background: "color-mix(in srgb, var(--error) 10%, transparent)",
@@ -315,7 +401,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
-            {compactError}
+            {compactError || attachmentError}
           </div>
         )}
         {/* Image previews */}
@@ -367,8 +453,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <textarea
             ref={textareaRef}
             value={value}
-            onChange={(e) => setValue(e.target.value)}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setHistoryIndex(null);
+            }}
             onKeyDown={handleKeyDown}
+            onCompositionStart={() => {
+              isComposingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              isComposingRef.current = false;
+              lastCompositionEndAtRef.current = Date.now();
+            }}
             onInput={handleInput}
             onPaste={handlePaste}
             placeholder={

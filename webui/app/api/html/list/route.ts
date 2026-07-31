@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireCurrentUser, unauthorizedResponse } from '@/lib/auth-lite';
 
 function serviceBaseUrl(): string | null {
   const value = process.env.HTML_PREVIEW_SERVICE_URL || process.env.NEXT_PUBLIC_HTML_PREVIEW_SERVICE_URL;
@@ -23,11 +24,23 @@ async function proxy(path: string, init: RequestInit = {}) {
 
 /** HTML 项目列表/删除代理 API，实际能力由独立 HTML Preview Service 提供。 */
 export async function GET() {
-  return proxy('/api/html/list', { method: 'GET' });
+  try {
+    await requireCurrentUser();
+    return proxy('/api/html/list', { method: 'GET' });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') return unauthorizedResponse();
+    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const qs = searchParams.toString();
-  return proxy(`/api/html/list${qs ? `?${qs}` : ''}`, { method: 'DELETE' });
+  try {
+    await requireCurrentUser();
+    const { searchParams } = new URL(request.url);
+    const qs = searchParams.toString();
+    return proxy(`/api/html/list${qs ? `?${qs}` : ''}`, { method: 'DELETE' });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') return unauthorizedResponse();
+    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+  }
 }

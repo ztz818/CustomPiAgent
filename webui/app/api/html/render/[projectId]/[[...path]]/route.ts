@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireCurrentUser, unauthorizedResponse } from '@/lib/auth-lite';
 
 function serviceBaseUrl(): string | null {
   const value = process.env.HTML_PREVIEW_SERVICE_URL || process.env.NEXT_PUBLIC_HTML_PREVIEW_SERVICE_URL;
@@ -14,6 +15,9 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ projectId: string; path?: string[] }> }
 ) {
+  const user = await requireCurrentUser().catch(() => null);
+  if (!user) return unauthorizedResponse();
+
   const baseUrl = serviceBaseUrl();
   if (!baseUrl) {
     return NextResponse.json(

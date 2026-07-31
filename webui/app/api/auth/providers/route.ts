@@ -1,30 +1,18 @@
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
+import { buildOAuthProviderList } from "@/lib/provider-listing";
+import { collectProviderListingInputs } from "@/lib/provider-listing-runtime";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const authStorage = AuthStorage.create();
-  const providers = authStorage.getOAuthProviders();
-
-  const EXCLUDED = new Set(["anthropic"]);
-  const DISPLAY_NAMES: Record<string, string> = {
-    "openai-codex": "ChatGPT Plus/Pro",
-    "github-copilot": "GitHub Copilot",
-  };
-
-  const result = await Promise.all(
-    providers
-      .filter((p) => !EXCLUDED.has(p.id))
-      .map(async (p) => {
-        const loggedIn = authStorage.has(p.id);
-        return {
-          id: p.id,
-          name: DISPLAY_NAMES[p.id] ?? p.name,
-          usesCallbackServer: p.usesCallbackServer ?? false,
-          loggedIn,
-        };
-      })
-  );
-
-  return Response.json({ providers: result });
+  try {
+    await requireCurrentUser();
+    const modelRuntime = await ModelRuntime.create();
+    const providers = buildOAuthProviderList(await collectProviderListingInputs(modelRuntime));
+    return Response.json({ providers });
+  } catch (error) {
+    if (error instanceof Error && error.message === "Unauthorized") return unauthorizedResponse();
+    return Response.json({ error: String(error) }, { status: 500 });
+  }
 }

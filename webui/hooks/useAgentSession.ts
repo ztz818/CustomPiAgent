@@ -98,6 +98,10 @@ export interface UseAgentSessionOptions {
 
 export type ThinkingLevelOption = "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+const PROGRAMMATIC_SCROLL_IGNORE_MS = 700;
+const USER_SCROLL_INTENT_MS = 1200;
+const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Space", "Spacebar"]);
+
 export interface ChatInputHandle {
   insertText: (text: string) => void;
   insertIfEmpty: (content: string) => void;
@@ -150,6 +154,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const initialScrollDoneRef = useRef(false);
   const lastUserMsgRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToUserRef = useRef(false);
+  const completionScrollAllowedRef = useRef(true);
+  const userScrollIntentUntilRef = useRef(0);
+  const ignoreProgrammaticScrollUntilRef = useRef(0);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const toolsRef = useRef<ToolEntry[]>([]);
@@ -269,9 +276,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
       };
       es.onerror = () => {
+        if (es.readyState !== EventSource.CLOSED) return;
         markConnected();
         if (eventSourceRef.current === es && agentRunningRef.current) {
-          es.close();
           eventSourceRef.current = null;
           setTimeout(() => {
             if (agentRunningRef.current) void connectEvents(sid);
@@ -288,11 +295,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const handleAgentEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
       case "agent_start":
+        agentRunningRef.current = true;
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
         dispatch({ type: "start" });
         break;
       case "agent_end":
+        agentRunningRef.current = false;
         setAgentRunning(false);
         setAgentPhase(null);
         setRetryInfo(null);
@@ -392,10 +401,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, userMsg]);
+    agentRunningRef.current = true;
     setAgentRunning(true);
     setAgentPhase({ kind: "waiting_model" });
     dispatch({ type: "start" });
     pendingScrollToUserRef.current = true;
+    completionScrollAllowedRef.current = true;
 
     const piImages = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
 
@@ -452,11 +463,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       }
     } catch (e) {
       console.error("Failed to send message:", e);
+      if (message) opts.chatInputRef?.current?.insertIfEmpty(message);
+      agentRunningRef.current = false;
       setAgentRunning(false);
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated]);
+  }, [isNew, newSessionCwd, newSessionModel, toolPreset, thinkingLevel, session, agentRunning, connectEvents, onSessionCreated, opts.chatInputRef]);
 
   const handleAbort = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -553,8 +566,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     } catch (e) {
       console.error("Failed to steer:", e);
+      if (message) opts.chatInputRef?.current?.insertIfEmpty(message);
     }
-  }, []);
+  }, [opts.chatInputRef]);
 
   const handleFollowUp = useCallback(async (message: string, images?: AttachedImage[]) => {
     const sid = sessionIdRef.current;
@@ -569,8 +583,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       });
     } catch (e) {
       console.error("Failed to follow up:", e);
+      if (message) opts.chatInputRef?.current?.insertIfEmpty(message);
     }
-  }, []);
+  }, [opts.chatInputRef]);
 
   const handleAbortCompaction = useCallback(async () => {
     const sid = sessionIdRef.current;
@@ -608,6 +623,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [setToolPresetState]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
 
@@ -616,7 +632,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     const el = lastUserMsgRef.current;
     if (!container || !el) return;
     const elAbsTop = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop;
+    ignoreProgrammaticScrollUntilRef.current = Date.now() + PROGRAMMATIC_SCROLL_IGNORE_MS;
     container.scrollTo({ top: elAbsTop - 16, behavior: "smooth" });
+  }, []);
+
+  const markUserScrollIntent = useCallback((event: Event) => {
+    if (event instanceof KeyboardEvent) {
+      if (!SCROLL_KEYS.has(event.key)) return;
+      if (event.target instanceof Element && event.target.closest("input, textarea, [contenteditable='true']")) return;
+    }
+    userScrollIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_MS;
+  }, []);
+
+  const handleScrollPositionChange = useCallback(() => {
+    if (!agentRunningRef.current) return;
+    if (Date.now() < ignoreProgrammaticScrollUntilRef.current) return;
+    if (Date.now() > userScrollIntentUntilRef.current) return;
+    completionScrollAllowedRef.current = false;
   }, []);
 
   // Load session on mount
@@ -627,6 +659,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         if (agentState?.running) {
           loadTools(session.id);
           if (agentState.state?.isStreaming) {
+            agentRunningRef.current = true;
             setAgentRunning(true);
             setAgentPhase({ kind: "waiting_model" });
             void connectEvents(session.id);
@@ -657,6 +690,28 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   }, [data?.tree, activeLeafId, handleLeafChange, onBranchDataChange]);
 
   useEffect(() => {
+    window.addEventListener("keydown", markUserScrollIntent);
+    window.addEventListener("pointerdown", markUserScrollIntent, { passive: true });
+    return () => {
+      window.removeEventListener("keydown", markUserScrollIntent);
+      window.removeEventListener("pointerdown", markUserScrollIntent);
+    };
+  }, [markUserScrollIntent]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.addEventListener("wheel", markUserScrollIntent, { passive: true });
+    container.addEventListener("touchstart", markUserScrollIntent, { passive: true });
+    container.addEventListener("scroll", handleScrollPositionChange, { passive: true });
+    return () => {
+      container.removeEventListener("wheel", markUserScrollIntent);
+      container.removeEventListener("touchstart", markUserScrollIntent);
+      container.removeEventListener("scroll", handleScrollPositionChange);
+    };
+  }, [messages.length, loading, handleScrollPositionChange, markUserScrollIntent]);
+
+  useEffect(() => {
     if (messages.length > 0) {
       if (pendingScrollToUserRef.current) {
         pendingScrollToUserRef.current = false;
@@ -665,7 +720,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       } else if (!initialScrollDoneRef.current) {
         initialScrollDoneRef.current = true;
         scrollToBottom("instant");
-      } else if (!agentRunningRef.current) {
+      } else if (!agentRunningRef.current && completionScrollAllowedRef.current) {
         scrollToBottom("smooth");
       }
     }
