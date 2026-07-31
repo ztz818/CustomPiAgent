@@ -17,7 +17,7 @@
 /drafts/
 /data/
 /webui/storage/
-/workspaces/*/drafts/
+/workspaces/
 /workspaces/*/logs/
 /workspaces/*/projects/
 

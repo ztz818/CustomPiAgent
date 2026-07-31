@@ -2,6 +2,8 @@
 
 # CustomPiAgent WebUI 一键启动脚本（后台常驻 + 内网穿透）
 
+set -euo pipefail
+
 PROJECT_ROOT="/workspace/nas-data/huya_projects/OpenAgents/projects/CustomPiAgent"
 WEBUI_DIR="${PROJECT_ROOT}/webui"
 FRP_DIR="/workspace/nas-data/huya_projects/OpenAgents/projects/Network/frp_0.64.0_linux_amd64"
@@ -10,32 +12,58 @@ LOG_DIR="${PROJECT_ROOT}/logs"
 WEBUI_PORT=13000
 FRP_REMOTE_PORT=11881
 
+# 模式：prod（默认，Webpack 构建）/ turbo（Turbopack 构建）/ dev（开发模式）
+MODE="${1:-prod}"
+
 # 创建日志目录
 mkdir -p "${LOG_DIR}"
 
 echo "=========================================="
 echo "CustomPiAgent WebUI 启动脚本"
+echo "模式: ${MODE}"
 echo "=========================================="
 
 # 1. 停止已有进程
 echo "[1/4] 停止已有进程..."
-pkill -f "next.*${WEBUI_PORT}" 2>/dev/null
-pkill -f "frpc.*frpc.toml" 2>/dev/null
+pkill -f "next.*${WEBUI_PORT}" 2>/dev/null || true
+pkill -f "frpc.*frpc.toml" 2>/dev/null || true
 sleep 2
 
-# 2. 构建 WebUI
-echo "[2/4] 构建 WebUI..."
-cd "${WEBUI_DIR}"
-npm_config_cache=../npm_cache npm run build > "${LOG_DIR}/webui_build.log" 2>&1
-if [ $? -ne 0 ]; then
-    echo "    ❌ 构建失败，请查看日志: ${LOG_DIR}/webui_build.log"
-    exit 1
+# 2. 构建 WebUI（仅生产模式）
+if [ "${MODE}" = "prod" ] || [ "${MODE}" = "turbo" ]; then
+    echo "[2/4] 构建 WebUI..."
+    cd "${WEBUI_DIR}"
+    
+    if [ "${MODE}" = "turbo" ]; then
+        echo "    使用 Turbopack 构建（实验性）"
+        npm_config_cache=../npm_cache npm run build > "${LOG_DIR}/webui_build.log" 2>&1
+    else
+        echo "    使用 Webpack 构建（生产推荐）"
+        npm_config_cache=../npm_cache npm run build:webpack > "${LOG_DIR}/webui_build.log" 2>&1
+    fi
+    
+    if [ $? -ne 0 ]; then
+        echo "    ❌ 构建失败，请查看日志: ${LOG_DIR}/webui_build.log"
+        tail -50 "${LOG_DIR}/webui_build.log"
+        exit 1
+    fi
+    echo "    ✅ 构建完成"
+else
+    echo "[2/4] 跳过构建（开发模式）"
 fi
-echo "    ✅ 构建完成"
 
 # 3. 启动 WebUI
 echo "[3/4] 启动 WebUI (端口 ${WEBUI_PORT})..."
-nohup sh -c "npm_config_cache=../npm_cache npm run start -- --port ${WEBUI_PORT}" > "${LOG_DIR}/webui_${WEBUI_PORT}.log" 2>&1 &
+cd "${WEBUI_DIR}"
+
+if [ "${MODE}" = "dev" ]; then
+    echo "    使用开发模式（热重载）"
+    nohup sh -c "npm_config_cache=../npm_cache npm run dev -- --port ${WEBUI_PORT}" > "${LOG_DIR}/webui_${WEBUI_PORT}.log" 2>&1 &
+else
+    echo "    使用生产模式"
+    nohup sh -c "npm_config_cache=../npm_cache npm run start -- --port ${WEBUI_PORT}" > "${LOG_DIR}/webui_${WEBUI_PORT}.log" 2>&1 &
+fi
+
 WEBUI_PID=$!
 echo "    WebUI PID: ${WEBUI_PID}"
 
@@ -47,14 +75,15 @@ for i in {1..30}; do
         break
     fi
     if [ $i -eq 30 ]; then
-        echo "    ❌ WebUI 启动超时"
+        echo "    ❌ WebUI 启动超时，查看日志："
+        tail -30 "${LOG_DIR}/webui_${WEBUI_PORT}.log"
         exit 1
     fi
     sleep 1
 done
 
-# 3. 启动内网穿透
-echo "[4/5] 启动内网穿透 (远程端口 ${FRP_REMOTE_PORT})..."
+# 4. 启动内网穿透
+echo "[4/4] 启动内网穿透 (远程端口 ${FRP_REMOTE_PORT})..."
 cd "${FRP_DIR}"
 nohup ./frpc -c frpc.toml > "${LOG_DIR}/frpc.log" 2>&1 &
 FRP_PID=$!
@@ -65,10 +94,11 @@ sleep 3
 if grep -q "start proxy success" "${LOG_DIR}/frpc.log"; then
     echo "    ✅ 内网穿透启动成功"
 else
-    echo "    ⚠️  内网穿透可能未成功，请检查日志"
+    echo "    ⚠️  内网穿透可能未成功，请检查日志："
+    tail -20 "${LOG_DIR}/frpc.log"
 fi
 
-# 4. 显示访问信息
+# 5. 显示访问信息
 echo ""
 echo "=========================================="
 echo "✅ 启动完成！"
@@ -90,6 +120,9 @@ echo "   frpc:  ${LOG_DIR}/frpc.log"
 echo ""
 echo "🛑 停止服务："
 echo "   kill ${WEBUI_PID} ${FRP_PID}"
-echo "   或运行: pkill -f 'next.*${WEBUI_PORT}' && pkill frpc"
+echo "   或运行: pkill -f 'next.*${WEBUI_PORT}' && pkill -f 'frpc.*frpc.toml'"
+echo ""
+echo "🔄 重启服务："
+echo "   ${PROJECT_ROOT}/start_webui.sh ${MODE}"
 echo ""
 echo "=========================================="

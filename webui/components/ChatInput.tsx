@@ -302,6 +302,22 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             Retrying ({retryInfo.attempt}/{retryInfo.maxAttempts})…{retryInfo.errorMessage && <span style={{ opacity: 0.7, marginLeft: 4 }}>— {retryInfo.errorMessage}</span>}
           </div>
         )}
+        {compactError && (
+          <div style={{
+            marginBottom: 8, padding: "5px 10px",
+            background: "color-mix(in srgb, var(--error) 10%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--error) 35%, transparent)",
+            borderRadius: 6, fontSize: 12, color: "var(--error)",
+            display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            {compactError}
+          </div>
+        )}
         {/* Image previews */}
         {attachedImages.length > 0 && (
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
@@ -791,17 +807,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
             {!isStreaming && onCompact && (
               <div style={{ position: "relative" }}>
-                {compactError && (
-                  <div style={{
-                    position: "absolute", bottom: "calc(100% + 6px)", right: 0,
-                    background: "#1f2937", color: "#f87171",
-                    fontSize: 11, padding: "4px 8px", borderRadius: 5,
-                    whiteSpace: "nowrap", pointerEvents: "none",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.2)", zIndex: 50,
-                  }}>
-                    {compactError}
-                  </div>
-                )}
                 <button
                   className="material-chip-button"
                   onClick={isCompacting ? onAbortCompaction : onCompact}

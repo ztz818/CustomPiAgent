@@ -69,6 +69,14 @@ function messageContentText(content: unknown): string | null {
   return text || null;
 }
 
+function normalizeCompactError(err: unknown): string {
+  const raw = (err instanceof Error ? err.message : String(err)).replace(/^Error:\s*/i, "").trim();
+  if (/conversation too short to compact/i.test(raw)) return "当前会话内容较短，暂无可压缩上下文";
+  if (/session not found/i.test(raw)) return "当前会话不存在，请刷新后重试";
+  if (/unsupported command/i.test(raw)) return "当前后端版本不支持手动压缩";
+  return raw || "压缩失败，请稍后重试";
+}
+
 export type AgentPhase =
   | { kind: "waiting_model" }
   | { kind: "running_tools"; tools: { id: string; name: string }[] }
@@ -515,14 +523,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
   const handleCompact = useCallback(async () => {
     const sid = sessionIdRef.current;
-    if (!sid || isCompacting) return;
+    if (isCompacting) return;
+    if (!sid) {
+      setCompactError("请先发送一条消息后再压缩上下文");
+      return;
+    }
     setIsCompacting(true);
     setCompactError(null);
     try {
       await sendAgentCommand(sid, { type: "compact" });
       await loadSession(sid, true);
     } catch (e) {
-      setCompactError(e instanceof Error ? e.message : String(e));
+      setCompactError(normalizeCompactError(e));
     } finally {
       setIsCompacting(false);
     }
@@ -682,7 +694,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   // Compact error auto-dismiss
   useEffect(() => {
     if (!compactError) return;
-    const t = setTimeout(() => setCompactError(null), 3000);
+    const t = setTimeout(() => setCompactError(null), 8000);
     return () => clearTimeout(t);
   }, [compactError]);
 
