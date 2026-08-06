@@ -71,7 +71,8 @@ function messageContentText(content: unknown): string | null {
 
 function normalizeCompactError(err: unknown): string {
   const raw = (err instanceof Error ? err.message : String(err)).replace(/^Error:\s*/i, "").trim();
-  if (/conversation too short to compact/i.test(raw)) return "当前会话内容较短，暂无可压缩上下文";
+  if (/conversation too short to compact|nothing to compact|session too small/i.test(raw)) return "当前分支没有超过保留窗口的旧历史，暂无可压缩上下文";
+  if (/already compacted/i.test(raw)) return "当前分支刚刚完成过压缩，请继续对话后再压缩";
   if (/session not found/i.test(raw)) return "当前会话不存在，请刷新后重试";
   if (/unsupported command/i.test(raw)) return "当前后端版本不支持手动压缩";
   return raw || "压缩失败，请稍后重试";
