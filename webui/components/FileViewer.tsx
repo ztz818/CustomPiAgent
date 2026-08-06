@@ -24,6 +24,7 @@ import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { parseUnifiedPatch } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
+import { OfficePreview } from "./OfficePreview";
 
 interface Props {
   filePath: string;
@@ -784,6 +785,10 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
 }
 
 export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
+  const officeExt = getFileExt(filePath);
+  if (officeExt === "xlsx" || officeExt === "xls" || officeExt === "pptx") {
+    return <OfficePreview filePath={filePath} cwd={cwd} kind={officeExt === "pptx" ? "pptx" : "excel"} />;
+  }
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }

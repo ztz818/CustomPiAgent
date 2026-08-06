@@ -693,6 +693,25 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     return () => { cancelled = true; };
   }, [cwd, refreshKey, treeRefreshKey]);
 
+  // Keep the workspace tree current while files are changed by the agent or
+  // another terminal. The explicit refreshKey remains available for callers.
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const sync = () => {
+      if (document.hidden) {
+        if (interval) { clearInterval(interval); interval = null; }
+        return;
+      }
+      if (!interval) interval = setInterval(() => setTreeRefreshKey((key) => key + 1), 1000);
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      if (interval) clearInterval(interval);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     fetchGitStatus(cwd)

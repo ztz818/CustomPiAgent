@@ -968,6 +968,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           <button
             onClick={() => setDropdownOpen((v) => !v)}
             title={selectedProject ?? selectedCwd ?? ""}
+            className="workspace-picker-tile"
             style={{
               width: "100%",
               display: "flex",
@@ -1057,6 +1058,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 {visibleProjects.map((project) => (
                   <button
                     key={project}
+                    className="workspace-project-option"
                     onClick={() => {
                       setSelectedCwd(project);
                       setProjectFilter("");

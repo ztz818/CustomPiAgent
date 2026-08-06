@@ -114,6 +114,9 @@ pre, code {
   font-family: var(--font-mono);
 }
 
+/* Hidden legacy session controls: history, title, branches, and system prompt. */
+.legacy-session-header-actions { display: none !important; }
+
 /* Preserved custom welcome workspace for empty sessions. */
 .nova-welcome { padding: 0 20px; }
 .nova-welcome-heading { margin-bottom: 28px; }
@@ -124,6 +127,13 @@ pre, code {
 .nova-scenario-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .nova-scenario-card { min-height: 164px; display: flex; flex-direction: column; align-items: flex-start; padding: 20px; border: 0; border-radius: 8px; color: #37352f; cursor: pointer; text-align: left; transition: transform 160ms ease, box-shadow 160ms ease; }
 .nova-scenario-card:hover { transform: translateY(-2px); box-shadow: 0 5px 14px rgba(15, 15, 15, 0.09); }
+
+/* Make the selected workspace read as a prominent workspace tile. */
+.workspace-picker-tile { min-height: 72px; padding: 12px 14px !important; border: 0 !important; border-radius: 8px !important; background: #dcecfa !important; color: #37352f !important; box-shadow: 0 2px 8px rgba(55, 53, 47, 0.08); }
+.workspace-picker-tile:hover { box-shadow: 0 5px 14px rgba(55, 53, 47, 0.12); }
+.workspace-project-option { min-height: 58px; margin: 4px 6px; width: calc(100% - 12px) !important; border-radius: 7px !important; background: color-mix(in srgb, #dcecfa 42%, var(--bg)) !important; }
+.workspace-project-option:nth-child(2n) { background: color-mix(in srgb, #d9f3e1 42%, var(--bg)) !important; }
+.workspace-project-option:nth-child(3n) { background: color-mix(in srgb, #ffe8d4 42%, var(--bg)) !important; }
 .nova-scenario-card:active { transform: translateY(0); }
 .nova-scenario-apricot { background: #ffe8d4; }
 .nova-scenario-mint { background: #d9f3e1; }
