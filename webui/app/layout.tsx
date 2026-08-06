@@ -10,8 +10,8 @@ const notoSansMono = Noto_Sans_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nova Agent",
-  description: "Nova Agent Web Interface",
+  title: "Nova Lab",
+  description: "Nova Lab Workspace",
 };
 
 export default function RootLayout({

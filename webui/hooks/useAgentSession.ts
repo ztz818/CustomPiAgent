@@ -746,6 +746,43 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }).catch(() => {});
   }, [isNew, modelsRefreshKey, setNewSessionModel]);
 
+  // Reconcile busy/compaction state in case the SSE connection misses an event.
+  // This is especially important for compaction: a missed end event would leave
+  // the stop-compaction control stuck indefinitely.
+  useEffect(() => {
+    const sid = sessionIdRef.current;
+    if (!sid || (!agentRunning && !isCompacting)) return;
+    let active = true;
+
+    const reconcile = async () => {
+      try {
+        const res = await fetch(`/api/agent/${encodeURIComponent(sid)}`);
+        if (!res.ok || !active) return;
+        const d = await res.json() as {
+          running?: boolean;
+          state?: {
+            isCompacting?: boolean;
+            contextUsage?: { percent: number | null; contextWindow: number; tokens: number | null } | null;
+            systemPrompt?: string;
+          };
+        };
+        if (!active) return;
+        setIsCompacting(d.state?.isCompacting ?? false);
+        if (d.state?.contextUsage !== undefined) setContextUsage(d.state.contextUsage ?? null);
+        if (d.state?.systemPrompt !== undefined) setSystemPrompt(d.state.systemPrompt ?? null);
+      } catch {
+        // SSE remains the primary path; retry on the next interval.
+      }
+    };
+
+    void reconcile();
+    const interval = setInterval(() => void reconcile(), 15_000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [agentRunning, isCompacting]);
+
   // Compact error auto-dismiss
   useEffect(() => {
     if (!compactError) return;

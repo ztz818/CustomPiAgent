@@ -254,32 +254,9 @@ export class AgentSessionWrapper {
       }
 
       case "compact": {
-        // Keep pre-check aligned with pi's boundaryStart rules (firstKeptEntryId-aware).
-        const { findCutPoint, DEFAULT_COMPACTION_SETTINGS } = await import("@earendil-works/pi-coding-agent");
-        const pathEntries = this.inner.sessionManager.getBranch() as Array<{ type: string; id?: string; firstKeptEntryId?: string }>;
-        const settings = { ...DEFAULT_COMPACTION_SETTINGS, ...this.inner.settingsManager.getCompactionSettings() };
-        let prevCompactionIndex = -1;
-        for (let i = pathEntries.length - 1; i >= 0; i--) {
-          if (pathEntries[i].type === "compaction") {
-            prevCompactionIndex = i;
-            break;
-          }
-        }
-        let boundaryStart = 0;
-        if (prevCompactionIndex >= 0) {
-          const prev = pathEntries[prevCompactionIndex];
-          const firstKeptEntryIndex = prev.firstKeptEntryId
-            ? pathEntries.findIndex((entry) => entry.id === prev.firstKeptEntryId)
-            : -1;
-          boundaryStart = firstKeptEntryIndex >= 0 ? firstKeptEntryIndex : prevCompactionIndex + 1;
-        }
-        const cutPoint = findCutPoint(pathEntries as never, boundaryStart, pathEntries.length, settings.keepRecentTokens);
-        const historyEnd = cutPoint.isSplitTurn ? cutPoint.turnStartIndex : cutPoint.firstKeptEntryIndex;
-        if (historyEnd <= boundaryStart) {
-          throw new Error("Conversation too short to compact");
-        }
-        const result = await this.inner.compact(command.customInstructions as string | undefined);
-        return result;
+        // Let the SDK own cut-point selection and validation. Its compaction
+        // settings and session format are the source of truth for this logic.
+        return await this.inner.compact(command.customInstructions as string | undefined);
       }
 
       case "set_auto_compaction": {

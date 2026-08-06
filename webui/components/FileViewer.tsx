@@ -6,6 +6,7 @@ import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { useTheme } from "@/hooks/useTheme";
 import { MarkdownBody } from "./MarkdownBody";
+import { OfficePreview } from "./OfficePreview";
 import { encodeFilePathForApi, getFileName, getRelativeFilePath } from "@/lib/file-paths";
 
 interface Props {
@@ -47,6 +48,8 @@ interface XlsxData {
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
 const AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "oga", "opus", "m4a", "aac", "flac", "weba", "webm"]);
 const PDF_EXTS = new Set(["pdf"]);
+const EXCEL_EXTS = new Set(["xlsx", "xls"]);
+const PPTX_EXTS = new Set(["pptx"]);
 const EDITABLE_TEXT_EXTS = new Set([
   "txt", "md", "mdx", "json", "jsonl", "yaml", "yml", "toml", "xml",
   "csv", "html", "htm", "css", "scss", "less", "js", "jsx", "ts", "tsx",
@@ -67,10 +70,20 @@ function isAudioPath(filePath: string): boolean {
   return AUDIO_EXTS.has(ext);
 }
 
+function getFileExtension(filePath: string): string {
+  return getFileName(filePath).toLowerCase().split(".").pop() ?? "";
+}
+
 function isPdfPath(filePath: string): boolean {
-  const base = getFileName(filePath);
-  const ext = base.toLowerCase().split(".").pop() ?? "";
-  return PDF_EXTS.has(ext);
+  return PDF_EXTS.has(getFileExtension(filePath));
+}
+
+function isExcelPath(filePath: string): boolean {
+  return EXCEL_EXTS.has(getFileExtension(filePath));
+}
+
+function isPptxPath(filePath: string): boolean {
+  return PPTX_EXTS.has(getFileExtension(filePath));
 }
 
 function isEditableTextPath(filePath: string): boolean {
@@ -602,6 +615,21 @@ function PdfViewer({ filePath, cwd }: { filePath: string; cwd?: string }) {
   );
 }
 
+function ExcelFileViewer({ filePath, cwd }: Props) {
+  const [compatibilityView, setCompatibilityView] = useState(false);
+  if (compatibilityView) {
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ height: 30, padding: "0 12px", display: "flex", alignItems: "center", borderBottom: "1px solid var(--border)", background: "var(--bg)", flexShrink: 0 }}>
+          <button type="button" className="office-preview-text-button" onClick={() => setCompatibilityView(false)}>高保真视图</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0 }}><TextFileViewer filePath={filePath} cwd={cwd} /></div>
+      </div>
+    );
+  }
+  return <OfficePreview filePath={filePath} cwd={cwd} kind="excel" onUseCompatibilityView={() => setCompatibilityView(true)} />;
+}
+
 export function FileViewer({ filePath, cwd }: Props) {
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} />;
@@ -611,6 +639,12 @@ export function FileViewer({ filePath, cwd }: Props) {
   }
   if (isPdfPath(filePath)) {
     return <PdfViewer filePath={filePath} cwd={cwd} />;
+  }
+  if (isExcelPath(filePath)) {
+    return <ExcelFileViewer filePath={filePath} cwd={cwd} />;
+  }
+  if (isPptxPath(filePath)) {
+    return <OfficePreview filePath={filePath} cwd={cwd} kind="pptx" />;
   }
   return <TextFileViewer filePath={filePath} cwd={cwd} />;
 }

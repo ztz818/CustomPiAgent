@@ -9,11 +9,10 @@ import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
 import { SkillsConfig } from "./SkillsConfig";
-import { BranchNavigator } from "./BranchNavigator";
 import { Chip } from "./ui/Chip";
 import { IconButton } from "./ui/IconButton";
 import { useTheme } from "@/hooks/useTheme";
-import type { SessionInfo, SessionTreeNode } from "@/lib/types";
+import type { SessionInfo } from "@/lib/types";
 import type { ChatInputHandle } from "./ChatInput";
 
 type CurrentUser = { id: string; username: string };
@@ -34,18 +33,6 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
-  const topBarRef = useRef<HTMLDivElement>(null);
-
-  // Branch navigator state — populated by ChatWindow via onBranchDataChange
-  const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
-  const [branchActiveLeafId, setBranchActiveLeafId] = useState<string | null>(null);
-  const branchLeafChangeFnRef = useRef<((leafId: string | null) => void) | null>(null);
-
-  const handleBranchDataChange = useCallback((tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => {
-    setBranchTree(tree);
-    setBranchActiveLeafId(activeLeafId);
-    branchLeafChangeFnRef.current = onLeafChange;
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,17 +59,6 @@ export function AppShell() {
     router.refresh();
   }, [router]);
 
-  const handleBranchLeafChange = useCallback((leafId: string | null) => {
-    branchLeafChangeFnRef.current?.(leafId);
-  }, []);
-
-  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
-  const systemBtnRef = useRef<HTMLButtonElement>(null);
-
-  const handleSystemPromptChange = useCallback((prompt: string | null) => {
-    setSystemPrompt(prompt);
-  }, []);
-
   // Session stats (tokens + cost) — populated by ChatWindow, displayed in top bar
   const [sessionStats, setSessionStats] = useState<{ tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null>(null);
   const handleSessionStatsChange = useCallback((stats: { tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }; cost?: number } | null) => {
@@ -94,26 +70,6 @@ export function AppShell() {
   const handleContextUsageChange = useCallback((usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => {
     setContextUsage(usage);
   }, []);
-
-  // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"branches" | "system" | null>(null);
-  const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
-
-  const toggleTopPanel = useCallback((panel: "branches" | "system") => {
-    setActiveTopPanel((cur) => cur === panel ? null : panel);
-  }, []);
-
-  useEffect(() => {
-    if (!activeTopPanel || !topBarRef.current) return;
-    const update = () => {
-      const rect = topBarRef.current!.getBoundingClientRect();
-      setTopPanelPos({ top: rect.bottom, left: rect.left, width: rect.width });
-    };
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(topBarRef.current);
-    return () => ro.disconnect();
-  }, [activeTopPanel]);
 
   // Right panel — file tabs only
   const [fileTabs, setFileTabs] = useState<Tab[]>([]);
@@ -146,10 +102,6 @@ export function AppShell() {
       return prev;
     });
     setSessionKey((k) => k + 1);
-    setBranchTree([]);
-    setBranchActiveLeafId(null);
-    setSystemPrompt(null);
-    setActiveTopPanel(null);
     router.replace("/", { scroll: false });
   }, [router]);
 
@@ -157,7 +109,6 @@ export function AppShell() {
     setNewSessionCwd(null);
     setSelectedSession(session);
     setSessionKey((k) => k + 1);
-    setSystemPrompt(null);
     setInitialSessionRestored(true);
     if (isRestore) {
       // Suppress the redundant sessionKey bump that would come from the
@@ -176,10 +127,6 @@ export function AppShell() {
     setSelectedSession(null);
     setNewSessionCwd(cwd);
     setSessionKey((k) => k + 1);
-    setBranchTree([]);
-    setBranchActiveLeafId(null);
-    setSystemPrompt(null);
-    setActiveTopPanel(null);
     router.replace("/", { scroll: false });
   }, [router]);
 
@@ -218,10 +165,6 @@ export function AppShell() {
       setSelectedSession(null);
       setNewSessionCwd(cwd ?? null);
       setSessionKey((k) => k + 1);
-      setBranchTree([]);
-      setBranchActiveLeafId(null);
-      setSystemPrompt(null);
-      setActiveTopPanel(null);
       router.replace("/", { scroll: false });
     }
   }, [selectedSession, router]);
@@ -235,18 +178,6 @@ export function AppShell() {
     setActiveFileTabId(tabId);
     setRightPanelOpen(true);
   }, []);
-
-  useEffect(() => {
-    if (!activeCwd) return;
-    const readmePath = `${activeCwd.replace(/[/\\]$/, "")}/README.md`;
-    const tabId = `file:${readmePath}`;
-    setFileTabs((prev) => {
-      if (prev.length > 0 || prev.find((t) => t.id === tabId)) return prev;
-      return [{ id: tabId, label: "README.md", filePath: readmePath }];
-    });
-    setActiveFileTabId((cur) => cur ?? tabId);
-    setRightPanelOpen(true);
-  }, [activeCwd]);
 
   const handleCloseFileTab = useCallback((tabId: string) => {
     setFileTabs((prev) => {
@@ -382,7 +313,7 @@ export function AppShell() {
       <Panel minSize="320px">
       <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}>
         {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{
+        <div style={{
           display: "flex",
           alignItems: "center",
           flexShrink: 0,
@@ -430,61 +361,12 @@ export function AppShell() {
               </svg>
             )}
           </IconButton>
-          {showChat && (
-            <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
-              <BranchNavigator
-                tree={branchTree}
-                activeLeafId={branchActiveLeafId}
-                onLeafChange={handleBranchLeafChange}
-                inline
-                containerRef={topBarRef}
-                open={activeTopPanel === "branches"}
-                onToggle={() => toggleTopPanel("branches")}
-                hasSession
-              />
-              <button
-                ref={systemBtnRef}
-                onClick={() => toggleTopPanel("system")}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  height: "100%", padding: "0 12px",
-                  background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
-                  border: "none",
-                  borderTop: activeTopPanel === "system" ? "2px solid var(--accent)" : "2px solid transparent",
-                  borderRight: "1px solid var(--border)",
-                  cursor: "pointer",
-                  color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
-                  fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)"; }}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }}>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="8" y1="13" x2="16" y2="13" />
-                  <line x1="8" y1="17" x2="13" y2="17" />
-                </svg>
-                <span>System</span>
-              </button>
-            </div>
-          )}
-          <IconButton
-            onClick={() => setRightPanelOpen((v) => !v)}
-            label={rightPanelOpen ? "Hide file panel" : "Show file panel"}
-            tone={rightPanelOpen ? "selected" : "default"}
-            style={{ marginLeft: showChat ? 4 : "auto" }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
-            </svg>
-          </IconButton>
           {currentUser && (
             <div style={{
               display: "flex",
               alignItems: "center",
               gap: 6,
-              marginLeft: showChat && (sessionStats || contextUsage) ? 6 : "auto",
+              marginLeft: "auto",
               paddingLeft: 8,
               color: "var(--text-muted)",
               fontSize: 12,
@@ -599,48 +481,6 @@ export function AppShell() {
               </div>
             );
           })()}
-          {/* Top panel dropdown — shared, only one active at a time */}
-          {activeTopPanel && topPanelPos && (
-            <div style={{
-              position: "fixed",
-              top: topPanelPos.top,
-              left: topPanelPos.left,
-              width: topPanelPos.width,
-              zIndex: 500,
-            }}>
-              {activeTopPanel === "system" && (
-                <div style={{
-                  background: "var(--surface)",
-                  borderBottom: "1px solid var(--outline-variant)",
-                  boxShadow: "var(--shadow-popover)",
-                }}>
-                  {systemPrompt ? (
-                    <div style={{
-                      maxHeight: "min(600px, 75vh)",
-                      overflowY: "auto",
-                      padding: "12px 16px",
-                      color: "var(--text-muted)",
-                      fontSize: 12,
-                      lineHeight: 1.6,
-                      whiteSpace: "pre-wrap",
-                      fontFamily: "var(--font-mono)",
-                    }}>
-                      {systemPrompt}
-                    </div>
-                  ) : systemPrompt === "" ? (
-                    <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-                      System prompt is empty (tools are disabled)
-                    </div>
-                  ) : (
-                    <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-                      Send a message to load the system prompt
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
         </div>
 
         {/* Chat content */}
@@ -655,8 +495,6 @@ export function AppShell() {
               onSessionForked={handleSessionForked}
               modelsRefreshKey={modelsRefreshKey}
               chatInputRef={chatInputRef}
-              onBranchDataChange={handleBranchDataChange}
-              onSystemPromptChange={handleSystemPromptChange}
               onSessionStatsChange={handleSessionStatsChange}
               onContextUsageChange={handleContextUsageChange}
             />
@@ -701,13 +539,22 @@ export function AppShell() {
       >
         {/* Right panel tab bar */}
         <div style={{ display: "flex", alignItems: "center", flexShrink: 0, background: "var(--surface)", borderBottom: "1px solid var(--outline-variant)", height: 44 }}>
-          <div style={{ flex: 1, overflow: "hidden" }}>
-            <TabBar
-              tabs={fileTabs}
-              activeTabId={activeFileTabId ?? ""}
-              onSelectTab={setActiveFileTabId}
-              onCloseTab={handleCloseFileTab}
-            />
+          <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+            {fileTabs.length > 0 ? (
+              <TabBar
+                tabs={fileTabs}
+                activeTabId={activeFileTabId ?? ""}
+                onSelectTab={setActiveFileTabId}
+                onCloseTab={handleCloseFileTab}
+              />
+            ) : (
+              <div style={{ height: 44, display: "flex", alignItems: "center", gap: 8, padding: "0 14px", color: "var(--text)", fontSize: 12, fontWeight: 650 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h6l2 2h10v11H3z" />
+                </svg>
+                Workspace
+              </div>
+            )}
           </div>
 
         </div>
@@ -717,8 +564,14 @@ export function AppShell() {
           {activeFileTab?.filePath ? (
             <FileViewer filePath={activeFileTab.filePath} cwd={activeCwd ?? undefined} />
           ) : (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-              No file open
+            <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, padding: 24, textAlign: "center" }}>
+              <div style={{ width: 42, height: 42, display: "grid", placeItems: "center", border: "1px solid var(--outline-variant)", borderRadius: 8, color: "var(--accent)", background: "var(--surface)" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h6l2 2h10v11H3z" />
+                </svg>
+              </div>
+              <div style={{ color: "var(--text)", fontSize: 13, fontWeight: 650 }}>Workspace 文件抽屉</div>
+              <div style={{ maxWidth: 250, color: "var(--text-muted)", fontSize: 12, lineHeight: 1.6 }}>从左侧工作区选择文件，即可在这里预览、编辑和对照处理。</div>
             </div>
           )}
         </div>
@@ -726,6 +579,26 @@ export function AppShell() {
           </Panel>
         </>
       )}
+
+      <Panel defaultSize="48px" minSize="48px" maxSize="48px">
+        <aside className="workspace-rail" aria-label="Workspace 文件抽屉">
+          <button
+            type="button"
+            className={`workspace-rail-button${rightPanelOpen ? " workspace-rail-button-active" : ""}`}
+            onClick={() => setRightPanelOpen((value) => !value)}
+            aria-expanded={rightPanelOpen}
+            title={rightPanelOpen ? "收起 Workspace" : "打开 Workspace"}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h6l2 2h10v11H3z" />
+            </svg>
+            <span>Workspace</span>
+            <svg className="workspace-rail-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d={rightPanelOpen ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"} />
+            </svg>
+          </button>
+        </aside>
+      </Panel>
       </Group>
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}

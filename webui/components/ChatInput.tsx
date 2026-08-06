@@ -41,6 +41,7 @@ interface Props {
   soundEnabled?: boolean;
   onSoundToggle?: () => void;
   draftKey?: string;
+  welcomeMode?: boolean;
 }
 
 export interface ChatInputHandle {
@@ -84,6 +85,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   inputHistory = [],
   soundEnabled, onSoundToggle,
   draftKey,
+  welcomeMode = false,
 }: Props, ref) {
   const initialDraft = draftKey ? getDraft(draftKey) : null;
   const [value, setValue] = useState(initialDraft?.value ?? "");
@@ -355,8 +357,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       style={{
         flexShrink: 0,
         background: "transparent",
-        padding: "0 16px 12px",
-        paddingRight: 52, // 16px base + 36px for ChatMinimap alignment
+        padding: welcomeMode ? 0 : "0 16px 12px",
+        paddingRight: welcomeMode ? 0 : 52,
       }}
     >
       {/* Hidden file input */}
@@ -440,13 +442,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             display: "flex",
             gap: 8,
             alignItems: "center",
-            background: "var(--surface)",
+            background: welcomeMode ? "var(--surface-container)" : "var(--surface)",
             border: `1px solid ${isStreaming && (onSteer || onFollowUp)
               ? "color-mix(in srgb, var(--warning) 55%, var(--outline))"
-              : "var(--outline-variant)"}`,
-            borderRadius: 18,
-            padding: "12px 12px 12px 16px",
-            boxShadow: "0 1px 2px rgba(60,64,67,0.10), 0 6px 18px -14px rgba(60,64,67,0.45)",
+              : welcomeMode ? "var(--outline)" : "var(--outline-variant)"}`,
+            borderRadius: welcomeMode ? 8 : 18,
+            padding: welcomeMode ? "14px 10px 14px 16px" : "12px 12px 12px 16px",
+            boxShadow: welcomeMode ? "0 1px 2px rgba(15,15,15,0.04)" : "0 1px 2px rgba(60,64,67,0.10), 0 6px 18px -14px rgba(60,64,67,0.45)",
             transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
           } as React.CSSProperties}
         >
@@ -471,6 +473,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               isStreaming && (onSteer || onFollowUp)
                 ? "Steer 立即注入 / Follow-up 排队…"
                 : isStreaming ? "Agent is running…"
+                : welcomeMode ? "描述目标，或直接选择下方场景开始…"
                 : "Message…"
             }
             rows={1}
@@ -549,7 +552,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 flexShrink: 0,
                 alignSelf: "flex-end",
                 display: "flex", alignItems: "center", gap: 6,
-                padding: "7px 14px",
+                width: welcomeMode ? 40 : undefined,
+                height: welcomeMode ? 38 : undefined,
+                justifyContent: "center",
+                padding: welcomeMode ? 0 : "7px 14px",
                 background: (value.trim() || attachedImages.length) ? "var(--accent)" : "var(--bg-panel)",
                 border: "none",
                 borderRadius: 8,
@@ -566,7 +572,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <line x1="2" y1="7" x2="11" y2="7" />
                 <polyline points="7.5 3 12 7 7.5 11" />
               </svg>
-              Send
+              {!welcomeMode && "Send"}
             </button>
           )}
         </div>

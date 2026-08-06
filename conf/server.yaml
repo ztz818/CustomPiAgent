@@ -21,6 +21,9 @@ users:
   - id: doctor_xiaohui
     username: doctor_xiaohui
     accessCode: "2026"
+  - id: zhouyuning666
+    username: zhouyuning666
+    accessCode: zhouyuning666
 
 workspaces:
   - id: demo
@@ -39,3 +42,7 @@ workspaces:
     name: Doctor Xiaohui Workspace
     rootPath: ./workspaces/doctor_xiaohui
     users: [doctor_xiaohui]
+  - id: zhouyuning666
+    name: Zhou Yuning Workspace
+    rootPath: ./workspaces/zhouyuning666
+    users: [zhouyuning666]
