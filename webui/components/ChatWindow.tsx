@@ -73,6 +73,37 @@ function findFinalAssistantIndex(messages: AgentMessage[], userIdx: number, endI
   return -1;
 }
 
+const TYPEWRITER_PHRASES = ["比起崩盘，我更怕碌碌无为的人生"];
+
+const WORK_SCENARIOS = [
+  { title: "整理材料", description: "阅读工作区文件，提炼重点、结论与待办。", prompt: "请阅读 Workspace 中与当前任务相关的材料，帮我提炼核心信息、关键结论和待办事项，并整理成结构清晰的摘要。", tone: "apricot" },
+  { title: "分析数据", description: "识别趋势和异常，给出可行动的洞察。", prompt: "请分析 Workspace 中的数据文件，说明主要趋势、异常点和可能原因，并给出可以采取的下一步行动建议。", tone: "mint" },
+  { title: "联网搜索", description: "检索最新公开信息，交叉验证并标注来源。", prompt: "请联网搜索与我的任务相关的最新可靠信息，交叉验证关键事实，整理核心结论，并附上来源链接和发布日期。", tone: "blue" },
+] as const;
+
+function Typewriter({ phrases }: { phrases: string[] }) {
+  const [phraseIdx, setPhraseIdx] = useState(0);
+  const [text, setText] = useState("");
+  const [caretOn, setCaretOn] = useState(true);
+  useEffect(() => {
+    const blink = setInterval(() => setCaretOn((value) => !value), 530);
+    return () => clearInterval(blink);
+  }, []);
+  useEffect(() => {
+    const phrase = phrases[phraseIdx];
+    if (text === phrase) return;
+    const timer = setTimeout(() => setText(phrase.slice(0, text.length + 1)), 55);
+    return () => clearTimeout(timer);
+  }, [phraseIdx, phrases, text]);
+  return <span>{text}<span style={{ opacity: caretOn ? 1 : 0, color: "var(--accent)", marginLeft: 1 }}>▍</span></span>;
+}
+
+function ScenarioIcon({ tone }: { tone: string }) {
+  if (tone === "blue") return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4M4 11h14M11 4a11 11 0 0 1 0 14M11 4a11 11 0 0 0 0 14" /></svg>;
+  if (tone === "mint") return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M4 19V12M10 19V8M16 19V4M22 19H2" /></svg>;
+  return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5V5a2 2 0 0 1 2-2h9l5 5v11.5A1.5 1.5 0 0 1 18.5 21h-13A1.5 1.5 0 0 1 4 19.5zM14 3v6h6M8 13h8M8 17h6" /></svg>;
+}
+
 function getUserInputText(message: AgentMessage): string | null {
   if (message.role !== "user") return null;
   if (typeof message.content === "string") {
@@ -378,6 +409,7 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
       onAudioUnlock={unlockAudio}
+      welcomeMode={isEmptyNew}
       draftKey={session?.id ?? (newSessionCwd ? `new:${newSessionCwd}` : undefined)}
       cwd={session?.cwd ?? newSessionCwd}
     />
@@ -458,35 +490,26 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
       )}
 
       {isEmptyNew ? (
-        <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">
-          <div className="w-full max-w-[820px]">
-            <div
-              className="mb-3"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
-                marginLeft: 16,
-                marginRight: 52,
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-                <span style={{ fontSize: 28, fontWeight: 700, letterSpacing: 0, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
-                <span style={{ fontSize: 22, color: "var(--text)", fontWeight: 700, letterSpacing: 0, flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  web <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
-                </span>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  pi <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
-                </span>
-              </div>
+        <div className="flex flex-1 overflow-y-auto px-4 py-8">
+          <div className="nova-welcome mx-auto flex w-full max-w-[860px] flex-col justify-center">
+            <div className="nova-welcome-heading">
+              <h1>没什么好怕的</h1>
+              <div className="nova-welcome-subtitle"><Typewriter phrases={TYPEWRITER_PHRASES} /></div>
             </div>
             <NoticeShelf notices={notices} align="right" />
             {chatInputElement}
+            <section className="nova-quick-start" aria-labelledby="quickStartTitle">
+              <h2 id="quickStartTitle">快速开始</h2>
+              <div className="nova-scenario-grid">
+                {WORK_SCENARIOS.map((scenario) => (
+                  <button key={scenario.title} type="button" className={`nova-scenario-card nova-scenario-${scenario.tone}`} onClick={() => chatInputRef?.current?.insertIfEmpty(scenario.prompt)}>
+                    <span className="nova-scenario-icon"><ScenarioIcon tone={scenario.tone} /></span>
+                    <strong>{scenario.title}</strong>
+                    <span>{scenario.description}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
           </div>
         </div>
       ) : (

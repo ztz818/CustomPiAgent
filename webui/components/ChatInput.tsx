@@ -67,6 +67,7 @@ interface Props {
   onSoundToggle?: () => void;
   onAudioUnlock?: () => void;
   draftKey?: string;
+  welcomeMode?: boolean;
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
 }
@@ -321,6 +322,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   soundEnabled, onSoundToggle, onAudioUnlock,
   onPromptWithStreamingBehavior,
   draftKey,
+  welcomeMode = false,
   cwd,
 }: Props, ref) {
   const { t } = useI18n();
@@ -1619,13 +1621,13 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               display: "flex",
               gap: 8,
               alignItems: "center",
-              background: "var(--bg)",
               border: `1px solid ${bashMode ? "var(--tool-bg)" : isStreaming && (onSteer || onFollowUp)
                 ? "rgba(234,179,8,0.4)"
                 : "color-mix(in srgb, var(--border) 70%, transparent)"}`,
-              borderRadius: 14,
-              padding: "10px 10px 10px 14px",
-              boxShadow: "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
+              padding: welcomeMode ? "14px 10px 14px 16px" : "10px 10px 10px 14px",
+              borderRadius: welcomeMode ? 8 : 14,
+              background: welcomeMode ? "var(--surface-container, var(--bg))" : "var(--bg)",
+              boxShadow: welcomeMode ? "0 1px 2px rgba(15,15,15,0.04)" : "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
               transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
             } as React.CSSProperties}
           >
@@ -1657,6 +1659,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               isStreaming && (onSteer || onFollowUp)
                 ? t("chat.steerPlaceholder")
                 : isStreaming ? t("chat.agentPlaceholder")
+                : welcomeMode ? "描述目标，或直接选择下方场景开始…"
                 : t("chat.messagePlaceholder")
             }
             rows={1}
