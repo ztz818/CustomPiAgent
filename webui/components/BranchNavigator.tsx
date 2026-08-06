@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import type { SessionEntry, SessionTreeNode } from "@/lib/types";
+import { useI18n } from "@/hooks/useI18n";
 
 interface Props {
   tree: SessionTreeNode[];
@@ -17,15 +18,20 @@ interface Props {
   onToggle?: () => void;
   /** Whether a session is currently active (used to show appropriate empty reason) */
   hasSession?: boolean;
+  /** When inline, render icon-only (no text label) to save horizontal space */
+  compact?: boolean;
 }
 
-// Find the set of entry IDs on the path from root to activeLeafId
+// Find the visible entry IDs on the path from root to activeLeafId.
 function buildActivePath(nodes: SessionTreeNode[], targetId: string | null): Set<string> {
   if (!targetId) return new Set();
+  const target = targetId;
   function search(nodes: SessionTreeNode[], path: string[]): string[] | null {
     for (const node of nodes) {
       const next = [...path, node.entry.id];
-      if (node.entry.id === targetId) return next;
+      if (node.entry.id === target || node.compressedEntryIds?.includes(target)) {
+        return next;
+      }
       const found = search(node.children, next);
       if (found) return found;
     }
@@ -34,14 +40,14 @@ function buildActivePath(nodes: SessionTreeNode[], targetId: string | null): Set
   return new Set(search(nodes, []) ?? []);
 }
 
-// Compress a linear chain into the first branching/leaf node.
-// Returns the representative node to display, plus a count of skipped nodes.
+// Compress a visible linear chain into the first branching/leaf node.
+// Server-side compressed IDs also count as skipped nodes.
 function compress(node: SessionTreeNode): { node: SessionTreeNode; skipped: number } {
   let current = node;
-  let skipped = 0;
+  let skipped = current.compressedEntryIds?.length ?? 0;
   while (current.children.length === 1) {
     current = current.children[0];
-    skipped++;
+    skipped += 1 + (current.compressedEntryIds?.length ?? 0);
   }
   return { node: current, skipped };
 }
@@ -211,7 +217,8 @@ function TreeNodeView({ node, activePathIds, depth, isLast, parentLines, onSelec
   );
 }
 
-export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession }: Props) {
+export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, containerRef, open: openProp, onToggle, hasSession, compact }: Props) {
+  const { t } = useI18n();
   const [openInternal, setOpenInternal] = useState(false);
   const open = openProp !== undefined ? openProp : openInternal;
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -241,9 +248,9 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
   }, [onLeafChange]);
 
   const noBranchReason = !hasSession
-    ? "No active session"
+    ? t("i18n.noActiveSession")
     : !hasBranch(tree)
-      ? "This session has no branches"
+      ? t("i18n.noBranches")
       : null;
 
   // Find first meaningful node (skip pure linear prefix)
@@ -291,9 +298,12 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
           }}
           onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.color = open ? "var(--text)" : "var(--text-muted)"; }}
+           title={t("i18n.branches")}
+           aria-label={t("i18n.branches")}
+          aria-pressed={open}
         >
           {branchIcon}
-          <span>Branches</span>
+           {!compact && <span>{t("i18n.branches")}</span>}
         </button>
         {open && dropdownPos && (
           <div style={{
@@ -350,7 +360,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
         }}
       >
         {branchIcon}
-        <span style={{ color: "var(--text-muted)" }}>Branches</span>
+         <span style={{ color: "var(--text-muted)" }}>{t("i18n.branches")}</span>
         {chevron}
       </button>
 
@@ -382,7 +392,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
             </div>
           ) : (
             <div style={{ padding: "10px 16px", fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
-              {noBranchReason ?? "This session has no branches"}
+              {noBranchReason ?? t("i18n.noBranches")}
             </div>
           )}
         </div>

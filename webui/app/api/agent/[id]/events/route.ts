@@ -1,6 +1,6 @@
 import { requireCurrentUser } from "@/lib/auth-lite";
 import { resolveSessionPath } from "@/lib/session-reader";
-import { getRpcSession, getRpcSessionOwner, startRpcSession } from "@/lib/rpc-manager";
+import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { findWorkspaceContainingPath } from "@/lib/workspace-config";
 
@@ -15,14 +15,11 @@ export async function GET(
   const user = await requireCurrentUser().catch(() => null);
   if (!user) return new Response("Unauthorized", { status: 401 });
 
-  const owner = getRpcSessionOwner(id);
+  const existing = getRpcSession(id);
   let filePath: string | null = null;
   let cwd: string;
-  if (owner) {
-    if (owner.userId && owner.userId !== user.id) {
-      return new Response("Session is not authorized", { status: 403 });
-    }
-    cwd = owner.cwd;
+  if (existing?.isAlive()) {
+    cwd = existing.cwd;
     filePath = await resolveSessionPath(id);
   } else {
     filePath = await resolveSessionPath(id);
@@ -39,7 +36,7 @@ export async function GET(
   if (!session || !session.isAlive()) {
     if (!filePath) return new Response("Session not found", { status: 404 });
     try {
-      ({ session } = await startRpcSession(id, filePath, cwd, undefined, user.id));
+      ({ session } = await startRpcSession(id, filePath, cwd, {}));
     } catch (error) {
       return new Response(`Failed to start agent: ${error}`, { status: 500 });
     }

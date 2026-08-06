@@ -204,7 +204,7 @@ function readTextPreview(filePath: string, stat: fs.Stats) {
 // enough that newly-created cwds appear promptly; stored on globalThis so it
 // survives Next.js hot-reload.
 declare global {
-  var __piAllowedRootsCache: Map<string, { roots: Set<string>; expiresAt: number }> | undefined;
+  var __novaFileAllowedRootsCache: Map<string, { roots: Set<string>; expiresAt: number }> | undefined;
 }
 
 const ALLOWED_ROOTS_TTL_MS = 5_000;
@@ -227,10 +227,10 @@ function filePathFromSegments(segments: string[]): string {
 
 async function getAllowedRoots(userId: string): Promise<Set<string>> {
   const now = Date.now();
-  if (!(globalThis.__piAllowedRootsCache instanceof Map)) {
-    globalThis.__piAllowedRootsCache = new Map();
+  if (!(globalThis.__novaFileAllowedRootsCache instanceof Map)) {
+    globalThis.__novaFileAllowedRootsCache = new Map();
   }
-  const cache = globalThis.__piAllowedRootsCache;
+  const cache = globalThis.__novaFileAllowedRootsCache;
   const cached = cache.get(userId);
   if (cached && cached.expiresAt > now) return cached.roots;
 
