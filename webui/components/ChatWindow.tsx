@@ -149,7 +149,9 @@ export function ChatWindow({ session, newSessionCwd, onAgentEnd, onSessionCreate
 
   const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 
-  const visibleMessages = messages.filter((m) => m.role === "user" || m.role === "assistant");
+  // Tool results render inside their assistant tool call; compaction/custom
+  // messages are standalone timeline items and must remain visible.
+  const visibleMessages = messages.filter((m) => m.role !== "toolResult");
   const inputHistory = useMemo(() => {
     const seen = new Set<string>();
     const history: string[] = [];
