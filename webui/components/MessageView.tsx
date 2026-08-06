@@ -12,6 +12,7 @@ import type {
   ImageContent,
   ToolCallContent,
   ThinkingContent,
+  CustomMessage,
 } from "@/lib/types";
 
 interface Props {
@@ -27,6 +28,7 @@ interface Props {
   onEditContent?: (content: string) => void;
   showTimestamp?: boolean;
   prevTimestamp?: number;
+  sessionId?: string;
 }
 
 function formatTime(ts?: number): string | null {
@@ -61,12 +63,16 @@ function copyText(text: string): Promise<void> {
   }
 }
 
-export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp }: Props) {
+export function MessageView({ message, isStreaming, toolResults, modelNames, entryId, onFork, forking, onNavigate, prevAssistantEntryId, onEditContent, showTimestamp, prevTimestamp, sessionId }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} prevAssistantEntryId={prevAssistantEntryId} onEditContent={onEditContent} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} />;
+  }
+  if (message.role === "custom") {
+    if ((message as CustomMessage).customType === "compaction") return <CompactionMessageView message={message as CustomMessage} />;
+    return null;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -281,6 +287,8 @@ function AssistantMessageView({
   modelNames,
   showTimestamp,
   prevTimestamp,
+  sessionId,
+  entryId,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -288,6 +296,8 @@ function AssistantMessageView({
   modelNames?: Record<string, string>;
   showTimestamp?: boolean;
   prevTimestamp?: number;
+  sessionId?: string;
+  entryId?: string;
 }) {
   const time = showTimestamp ? formatTime(message.timestamp) : null;
   const blocks = message.content ?? [];
@@ -457,7 +467,7 @@ function AssistantMessageView({
         padding: "2px 0",
       }}>
         {blocks.map((block, i) => (
-          <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} />
+          <BlockView key={i} block={block} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(i) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} sessionId={sessionId} entryId={entryId} blockIndex={i} />
         ))}
       </div>
 
@@ -532,12 +542,12 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number> }) {
+function BlockView({ block, toolResults, isStreaming, streamingDuration, toolCallDurations, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; sessionId?: string; entryId?: string; blockIndex: number }) {
   if (block.type === "text") {
     return <TextBlock block={block as TextContent} isStreaming={isStreaming} />;
   }
   if (block.type === "thinking") {
-    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} />;
+    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
   }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
@@ -552,8 +562,30 @@ function TextBlock({ block, isStreaming }: { block: TextContent; isStreaming?: b
   return <MarkdownBody isStreaming={isStreaming}>{block.text}</MarkdownBody>;
 }
 
-function ThinkingBlock({ block, duration }: { block: ThinkingContent; duration?: number }) {
+function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: { block: ThinkingContent; duration?: number; sessionId?: string; entryId?: string; blockIndex: number }) {
   const [expanded, setExpanded] = useState(false);
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = async () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (!next || !block.deferred || content !== null) return;
+    if (!sessionId || !entryId) { setError("Thinking content unavailable"); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/thinking?blockIndex=${blockIndex}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json() as { thinking?: unknown };
+      if (typeof data.thinking !== "string") throw new Error("Invalid thinking response");
+      setContent(data.thinking);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  };
   return (
     <div
       style={{
@@ -565,7 +597,7 @@ function ThinkingBlock({ block, duration }: { block: ThinkingContent; duration?:
       }}
     >
       <button
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => void toggle()}
         style={{
           display: "flex",
           alignItems: "center",
@@ -597,13 +629,26 @@ function ThinkingBlock({ block, duration }: { block: ThinkingContent; duration?:
             borderTop: "1px solid var(--outline-variant)",
           }}
         >
-          {block.thinking}
+          {loading ? "Loading thinking…" : error ?? (block.deferred ? content : block.thinking)}
         </div>
       )}
     </div>
   );
 }
 
+function CompactionMessageView({ message }: { message: CustomMessage }) {
+  const summary = typeof message.content === "string" ? message.content : message.content.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  return (
+    <div style={{ marginBottom: 16, border: "1px solid var(--outline-variant)", borderRadius: 8, overflow: "hidden", background: "var(--surface)" }}>
+      <div style={{ padding: "7px 10px", borderBottom: "1px solid var(--outline-variant)", background: "var(--surface-container)", color: "var(--text-muted)", fontSize: 11, fontFamily: "var(--font-mono)" }}>compaction</div>
+      <div style={{ padding: "11px 13px 12px" }}>
+        <div style={{ color: "var(--text)", fontSize: 15, fontWeight: 700 }}>会话已压缩</div>
+        <div style={{ margin: "3px 0 10px", color: "var(--text-muted)", fontSize: 13 }}>此处之前的会话历史已压缩为以下摘要：</div>
+        {summary ? <MarkdownBody className="markdown-compaction-message">{summary}</MarkdownBody> : <span style={{ color: "var(--text-dim)", fontSize: 12 }}>暂无摘要</span>}
+      </div>
+    </div>
+  );
+}
 
 function ToolCallBlock({ block, result, isRunning, duration }: { block: ToolCallContent; result?: ToolResultMessage; isRunning?: boolean; duration?: number }) {
   const [expanded, setExpanded] = useState(false);
