@@ -122,11 +122,11 @@ pre, code {
 .auth-user-control button { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; }
 .auth-user-control button:hover { background: var(--bg-hover); color: var(--text); }
 @media (max-width: 640px) { .auth-user-name { max-width: 84px; } .auth-user-control { padding: 0 6px; } .auth-user-control button { padding: 0 6px; font-size: 11px; } }
-.workspace-rail { width: 48px; flex: 0 0 48px; height: 100%; border-left: 1px solid var(--border); background: var(--bg-panel); }
-.workspace-rail-button { width: 100%; min-height: 150px; height: 100%; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 12px 0; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 11px; font-weight: 600; transition: background 0.12s, color 0.12s; }
+.workspace-rail { width: 40px; flex: 0 0 40px; height: 100%; border-left: 1px solid var(--border); background: var(--bg-panel); }
+.workspace-rail-button { position: relative; width: 100%; height: 40px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; transition: background 0.12s, color 0.12s; }
+.workspace-rail-button::before { position: absolute; top: 8px; bottom: 8px; left: 0; width: 2px; border-radius: 1px; background: var(--accent); content: ""; opacity: 0; }
 .workspace-rail-button:hover, .workspace-rail-button-active { background: var(--bg-hover); color: var(--text); }
-.workspace-rail-button span { writing-mode: vertical-rl; letter-spacing: 0; }
-.workspace-rail-chevron { margin-top: auto; opacity: 0.7; }
+.workspace-rail-button-active::before { opacity: 1; }
 @media (max-width: 640px) { .workspace-rail { display: none; } }
 .file-preview-fullscreen-button { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 32px; margin-right: 50px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); cursor: pointer; }
 .file-preview-fullscreen-button:hover { background: var(--bg-hover); color: var(--text); }

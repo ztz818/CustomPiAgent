@@ -1665,10 +1665,6 @@ export function AppShell() {
               <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2H19.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
               <path d="M3 9h18" />
             </svg>
-            <span>Workspace</span>
-            <svg className="workspace-rail-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d={rightPanelOpen ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"} />
-            </svg>
           </button>
         </aside>
       )}
