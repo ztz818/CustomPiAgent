@@ -662,6 +662,7 @@ export function AppShell() {
         onAtMentions={handleAtMentions}
       />
       <div className="sidebar-footer">
+        <div className="sidebar-footer-row">
         {([
           {
              label: translate("common.models"),
@@ -684,7 +685,7 @@ export function AppShell() {
             disabled={disabled}
             title={label}
             style={{
-              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              flex: 1, minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               height: 32, padding: 0, background: "none", border: "none",
               borderRadius: 9, color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
               fontSize: 12, opacity: disabled ? 0.35 : 1,
@@ -698,11 +699,15 @@ export function AppShell() {
           </button>
         ))}
         {currentUser && (
-          <div className="auth-user-control sidebar-auth-user-control">
-            <span className="auth-user-name" title={currentUser.id}>{currentUser.username}</span>
-            <button type="button" onClick={() => void handleLogout()} title="退出登录" aria-label="退出登录">退出登录</button>
-          </div>
+          <button type="button" className="sidebar-account-button" onClick={() => void handleLogout()} title={`退出 ${currentUser.username}`} aria-label={`退出 ${currentUser.username}`}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M20 21a8 8 0 0 0-16 0" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+            <span className="sidebar-account-name">{currentUser.username}</span>
+          </button>
         )}
+        </div>
       </div>
     </>
   );
