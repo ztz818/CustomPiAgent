@@ -926,6 +926,20 @@ export function AppShell() {
                <path d="M14 18h6" />
              </svg>
            </button>
+          <button
+            type="button"
+            onClick={() => setRightPanelOpen((open) => !open)}
+            aria-controls="file-panel"
+            aria-expanded={rightPanelOpen}
+            aria-label={rightPanelOpen ? "收起 Workspace" : "打开 Workspace"}
+            title={rightPanelOpen ? "收起 Workspace" : "打开 Workspace"}
+            className={`workspace-toggle-button${rightPanelOpen ? " is-open" : ""}`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2H19.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
+              <path d="M3 9h18" />
+            </svg>
+          </button>
           {currentUser && (
             <div className="auth-user-control">
               <span className="auth-user-name" title={currentUser.id}>{currentUser.username}</span>
@@ -1651,23 +1665,6 @@ export function AppShell() {
           )}
         </div>
       </div>
-      {!filePreviewExpanded && (
-        <aside className="workspace-rail" aria-label="Workspace 文件抽屉">
-          <button
-            type="button"
-            className={`workspace-rail-button${rightPanelOpen ? " workspace-rail-button-active" : ""}`}
-            onClick={() => setRightPanelOpen((open) => !open)}
-            aria-controls="file-panel"
-            aria-expanded={rightPanelOpen}
-            title={rightPanelOpen ? "收起 Workspace" : "打开 Workspace"}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2H19.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
-              <path d="M3 9h18" />
-            </svg>
-          </button>
-        </aside>
-      )}
     </div>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (

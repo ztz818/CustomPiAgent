@@ -122,12 +122,9 @@ pre, code {
 .auth-user-control button { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; }
 .auth-user-control button:hover { background: var(--bg-hover); color: var(--text); }
 @media (max-width: 640px) { .auth-user-name { max-width: 84px; } .auth-user-control { padding: 0 6px; } .auth-user-control button { padding: 0 6px; font-size: 11px; } }
-.workspace-rail { width: 40px; flex: 0 0 40px; height: 100%; border-left: 1px solid var(--border); background: var(--bg-panel); }
-.workspace-rail-button { position: relative; width: 100%; height: 40px; display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--text-muted); cursor: pointer; transition: background 0.12s, color 0.12s; }
-.workspace-rail-button::before { position: absolute; top: 8px; bottom: 8px; left: 0; width: 2px; border-radius: 1px; background: var(--accent); content: ""; opacity: 0; }
-.workspace-rail-button:hover, .workspace-rail-button-active { background: var(--bg-hover); color: var(--text); }
-.workspace-rail-button-active::before { opacity: 1; }
-@media (max-width: 640px) { .workspace-rail { display: none; } }
+.workspace-toggle-button { position: relative; display: grid; place-items: center; width: 36px; height: 36px; flex: 0 0 36px; padding: 0; border: 0; border-right: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; transition: background 0.12s, color 0.12s; }
+.workspace-toggle-button:hover, .workspace-toggle-button.is-open { background: var(--bg-hover); color: var(--text); }
+.workspace-toggle-button.is-open::after { position: absolute; right: 6px; bottom: 6px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg-panel); content: ""; }
 .file-preview-fullscreen-button { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 32px; margin-right: 50px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); cursor: pointer; }
 .file-preview-fullscreen-button:hover { background: var(--bg-hover); color: var(--text); }
 .right-panel-container.file-preview-expanded { position: fixed !important; inset: 0 !important; z-index: 1000 !important; width: 100vw !important; min-width: 0 !important; max-width: none !important; height: 100dvh !important; transform: none !important; border: 0 !important; background: var(--bg) !important; box-shadow: none !important; }
