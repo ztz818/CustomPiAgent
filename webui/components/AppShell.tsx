@@ -661,7 +661,7 @@ export function AppShell() {
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
       />
-      <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
+      <div className="sidebar-footer">
         {([
           {
              label: translate("common.models"),
@@ -684,7 +684,7 @@ export function AppShell() {
             disabled={disabled}
             title={label}
             style={{
-              flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               height: 32, padding: 0, background: "none", border: "none",
               borderRadius: 9, color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
               fontSize: 12, opacity: disabled ? 0.35 : 1,
@@ -697,6 +697,12 @@ export function AppShell() {
             {label}
           </button>
         ))}
+        {currentUser && (
+          <div className="auth-user-control sidebar-auth-user-control">
+            <span className="auth-user-name" title={currentUser.id}>{currentUser.username}</span>
+            <button type="button" onClick={() => void handleLogout()} title="退出登录" aria-label="退出登录">退出登录</button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -932,12 +938,6 @@ export function AppShell() {
                <path d="M14 18h6" />
              </svg>
            </button>
-          {currentUser && (
-            <div className="auth-user-control">
-              <span className="auth-user-name" title={currentUser.id}>{currentUser.username}</span>
-              <button type="button" onClick={() => void handleLogout()} title="退出登录" aria-label="退出登录">退出登录</button>
-            </div>
-          )}
           {showChat && projectTrust?.requiresTrust && !projectTrust.trusted && (
             <button
               type="button"

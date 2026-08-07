@@ -121,6 +121,9 @@ pre, code {
 .auth-user-name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 .auth-user-control button { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; }
 .auth-user-control button:hover { background: var(--bg-hover); color: var(--text); }
+.sidebar-footer { padding: 8px; flex-shrink: 0; border-top: 1px solid var(--border); }
+.sidebar-auth-user-control { margin: 6px -2px -2px; padding: 6px 2px 0; border-top: 1px solid var(--border); }
+.sidebar-auth-user-control .auth-user-name { flex: 1; }
 @media (max-width: 640px) { .auth-user-name { max-width: 84px; } .auth-user-control { padding: 0 6px; } .auth-user-control button { padding: 0 6px; font-size: 11px; } }
 /* Restored from the legacy Nova Lab workspace rail. */
 .workspace-rail { width: 48px; flex: 0 0 48px; height: 100%; border-left: 1px solid var(--outline-variant); background: var(--surface-container); }
