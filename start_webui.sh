@@ -25,9 +25,43 @@ echo "=========================================="
 
 # 1. 停止已有进程
 echo "[1/4] 停止已有进程..."
-pkill -f "next.*${WEBUI_PORT}" 2>/dev/null || true
+
+# next-server 启动后命令行通常不再包含端口，单靠 pkill 无法命中。
+# 先停止启动包装进程，再按监听端口精确清理实际 server PID。
+pkill -f "next.*--port ${WEBUI_PORT}" 2>/dev/null || true
+pkill -f "next.*-p ${WEBUI_PORT}" 2>/dev/null || true
+
+get_webui_port_pids() {
+    ss -H -ltnp "sport = :${WEBUI_PORT}" 2>/dev/null \
+        | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' \
+        | sort -u
+}
+
+WEBUI_OLD_PIDS="$(get_webui_port_pids)"
+if [ -n "${WEBUI_OLD_PIDS}" ]; then
+    echo "    停止端口 ${WEBUI_PORT} 上的旧进程: ${WEBUI_OLD_PIDS//$'\n'/ }"
+    kill ${WEBUI_OLD_PIDS} 2>/dev/null || true
+fi
+
+for _ in {1..20}; do
+    [ -z "$(get_webui_port_pids)" ] && break
+    sleep 0.25
+done
+
+WEBUI_OLD_PIDS="$(get_webui_port_pids)"
+if [ -n "${WEBUI_OLD_PIDS}" ]; then
+    echo "    强制停止未退出的旧进程: ${WEBUI_OLD_PIDS//$'\n'/ }"
+    kill -9 ${WEBUI_OLD_PIDS} 2>/dev/null || true
+    sleep 1
+fi
+
+if [ -n "$(get_webui_port_pids)" ]; then
+    echo "    ❌ 端口 ${WEBUI_PORT} 仍被占用，停止启动以避免覆盖运行中服务的构建产物"
+    exit 1
+fi
+
 pkill -f "frpc.*frpc.toml" 2>/dev/null || true
-sleep 2
+sleep 1
 
 # 2. 构建 WebUI（仅生产模式）
 if [ "${MODE}" = "prod" ] || [ "${MODE}" = "turbo" ]; then
