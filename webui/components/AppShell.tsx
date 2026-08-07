@@ -757,6 +757,12 @@ export function AppShell() {
         background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 24%, transparent), transparent);
         animation: session-info-light-wash 620ms ease-out both;
       }
+      .workspace-rail { width: 48px; flex: 0 0 48px; height: 100%; border-left: 1px solid var(--outline-variant); background: var(--surface-container); }
+      .workspace-rail-button { width: 100%; min-height: 152px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 10px; padding: 16px 6px 12px; border: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.16); background: #5645d4; color: #fff; cursor: pointer; font-size: 11px; font-weight: 650; transition: background 160ms ease; }
+      .workspace-rail-button:hover, .workspace-rail-button-active { background: #4534b3; }
+      .workspace-rail-button span { writing-mode: vertical-rl; letter-spacing: 1px; }
+      .workspace-rail-chevron { margin-top: auto; opacity: 0.76; }
+      @media (max-width: 640px) { .workspace-rail { display: none; } }
       @media (prefers-reduced-motion: reduce) {
         .session-info-popover,
         .session-info-popover::after {
