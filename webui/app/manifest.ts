@@ -3,9 +3,9 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "Pi Web",
-    short_name: "Pi Web",
-    description: "Local web interface for the pi coding agent",
+    name: "Nova Lab",
+    short_name: "Nova Lab",
+    description: "Nova Lab workspace",
     start_url: "/",
     scope: "/",
     display: "standalone",
@@ -16,15 +16,9 @@ export default function manifest(): MetadataRoute.Manifest {
     lang: "en",
     icons: [
       {
-        src: "/icons/icon-192.png",
-        sizes: "192x192",
-        type: "image/png",
-        purpose: "any",
-      },
-      {
-        src: "/icons/icon-512.png",
-        sizes: "512x512",
-        type: "image/png",
+        src: "/icons/nova-lab.svg",
+        sizes: "any",
+        type: "image/svg+xml",
         purpose: "any",
       },
     ],

@@ -11,30 +11,18 @@ const notoSansMono = Noto_Sans_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pi Web",
-  description: "Pi Web interface for the pi coding agent",
-  applicationName: "Pi Web",
+  title: "Nova Lab",
+  description: "Nova Lab workspace",
+  applicationName: "Nova Lab",
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: [
-      {
-        url: "/icons/icon-192.png",
-        sizes: "192x192",
-        type: "image/png",
-      },
-    ],
-    apple: [
-      {
-        url: "/icons/apple-touch-icon.png",
-        sizes: "180x180",
-        type: "image/png",
-      },
-    ],
+    icon: [{ url: "/icons/nova-lab.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icons/nova-lab.svg", type: "image/svg+xml" }],
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Pi Web",
+    title: "Nova Lab",
   },
   formatDetection: {
     telephone: false,
