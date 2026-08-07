@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
 import {
   encodeFilePathForApi,
@@ -72,6 +72,23 @@ interface PendingConflict {
   files: File[];
   conflicts: string[];
   nonReplaceable: string[];
+}
+
+interface FileMenuState {
+  x: number;
+  y: number;
+  node: FileNode;
+}
+
+async function runJsonAction(url: string, init: RequestInit) {
+  const response = await fetch(url, init);
+  const data = await response.json().catch(() => ({})) as { error?: string };
+  if (!response.ok) throw new Error(data.error ?? `Request failed (HTTP ${response.status})`);
+  return data;
+}
+
+function downloadPath(filePath: string, isDir: boolean) {
+  window.location.href = `/api/files/${encodeFilePathForApi(filePath)}?type=${isDir ? "download-zip" : "download"}`;
 }
 
 async function fetchEntries(dirPath: string): Promise<FileNode[]> {
@@ -221,6 +238,7 @@ function TreeNode({
   highlightedPaths,
   gitStatusByPath,
   changedDirectoryPaths,
+  onContextMenu,
   t,
 }: {
   node: FileNode;
@@ -234,6 +252,7 @@ function TreeNode({
   highlightedPaths: Set<string>;
   gitStatusByPath: Map<string, GitFileStatus>;
   changedDirectoryPaths: Set<string>;
+  onContextMenu: (event: ReactMouseEvent, node: FileNode) => void;
   t: Translate;
 }) {
   const open = expandedPaths.has(node.fullPath);
@@ -284,6 +303,7 @@ function TreeNode({
     <div>
       <div
         onClick={handleClick}
+        onContextMenu={(event) => onContextMenu(event, node)}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         style={{
@@ -443,6 +463,7 @@ function TreeNode({
               highlightedPaths={highlightedPaths}
               gitStatusByPath={gitStatusByPath}
               changedDirectoryPaths={changedDirectoryPaths}
+              onContextMenu={onContextMenu}
               t={t}
             />
           ))}
@@ -540,8 +561,70 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [pendingConflict, setPendingConflict] = useState<PendingConflict | null>(null);
   const prevCwdRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [menu, setMenu] = useState<FileMenuState | null>(null);
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
   const uploadBusy = uploadPhase !== "idle";
+
+  const refreshTree = useCallback(() => setTreeRefreshKey((key) => key + 1), []);
+
+  const handleContextMenu = useCallback((event: ReactMouseEvent, node: FileNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({ x: event.clientX, y: event.clientY, node });
+  }, []);
+
+  const createEntry = useCallback(async (parentPath: string, type: "mkdir" | "touch") => {
+    setMenu(null);
+    const suggested = type === "mkdir" ? "untitled" : "untitled.md";
+    const name = window.prompt(type === "mkdir" ? "Folder name" : "File name", suggested)?.trim();
+    if (!name) return;
+    await runJsonAction(`/api/files/${encodeFilePathForApi(parentPath)}?type=${type}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    refreshTree();
+  }, [refreshTree]);
+
+  const renameEntry = useCallback(async (node: FileNode) => {
+    setMenu(null);
+    const name = window.prompt("Rename", node.name)?.trim();
+    if (!name || name === node.name) return;
+    await runJsonAction(`/api/files/${encodeFilePathForApi(node.fullPath)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    refreshTree();
+  }, [refreshTree]);
+
+  const deleteEntry = useCallback(async (node: FileNode) => {
+    setMenu(null);
+    if (!window.confirm(`Delete ${node.isDir ? "folder" : "file"} “${node.name}”?`)) return;
+    await runJsonAction(`/api/files/${encodeFilePathForApi(node.fullPath)}`, { method: "DELETE" });
+    refreshTree();
+  }, [refreshTree]);
+
+  const uploadInto = useCallback((directory: string) => {
+    setMenu(null);
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files ?? []);
+      if (files.length === 0) return;
+      const form = new FormData();
+      files.forEach((file) => form.append("files", file, file.name));
+      form.append("overwrite", "false");
+      try {
+        await runJsonAction(`/api/files/${encodeFilePathForApi(directory)}?type=upload`, { method: "POST", body: form });
+        refreshTree();
+      } catch (reason) {
+        window.alert(reason instanceof Error ? reason.message : String(reason));
+      }
+    };
+    input.click();
+  }, [refreshTree]);
 
   const gitStatusByPath = useMemo(() => new Map(
     gitFiles.map((status) => [normalizeFilePathSlashes(status.filePath), status]),
@@ -671,6 +754,22 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   useEffect(() => () => onUploadBusyChange?.(false), [onUploadBusyChange]);
 
   useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    window.addEventListener("click", close);
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [menu]);
+
+  useEffect(() => {
     const cwdChanged = prevCwdRef.current !== cwd;
     prevCwdRef.current = cwd;
 
@@ -730,7 +829,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
         }
       });
     return () => { cancelled = true; };
-  }, [cwd, refreshKey, treeRefreshKey]);
+  }, [cwd, refreshKey]);
 
   useEffect(() => {
     onChangesCountChange?.(gitFiles.length);
@@ -746,7 +845,13 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   }, [cwd, onAtMentions, uploadSummary]);
 
   return (
-    <div style={{ minHeight: "100%" }}>
+    <div
+      style={{ minHeight: "100%" }}
+      onContextMenu={(event) => {
+        if (event.target !== event.currentTarget) return;
+        handleContextMenu(event, { name: getFileName(cwd) || cwd, fullPath: cwd, isDir: true, size: 0 });
+      }}
+    >
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
       {showUploadFeedback && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
@@ -909,6 +1014,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                 highlightedPaths={highlightedPaths}
                 gitStatusByPath={gitStatusByPath}
                 changedDirectoryPaths={changedDirectoryPaths}
+                onContextMenu={handleContextMenu}
                 t={t}
               />
             ))
@@ -920,6 +1026,65 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
           )}
         </div>
       )}
+
+      {menu && (
+        <div
+          role="menu"
+          aria-label={`${menu.node.name} actions`}
+          onClick={(event) => event.stopPropagation()}
+          style={{
+            position: "fixed",
+            left: Math.min(menu.x, window.innerWidth - 196),
+            top: Math.min(menu.y, window.innerHeight - 300),
+            zIndex: 1000,
+            width: 188,
+            padding: 5,
+            border: "1px solid var(--border)",
+            borderRadius: 7,
+            background: "var(--bg-panel)",
+            boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
+          }}
+        >
+          {menu.node.isDir && (
+            <>
+              <FileMenuButton label="New file" onClick={() => void createEntry(menu.node.fullPath, "touch").catch((error) => window.alert(String(error)))} />
+              <FileMenuButton label="New folder" onClick={() => void createEntry(menu.node.fullPath, "mkdir").catch((error) => window.alert(String(error)))} />
+              <FileMenuButton label="Upload here" onClick={() => uploadInto(menu.node.fullPath)} />
+              <div style={{ height: 1, margin: "4px 3px", background: "var(--border)" }} />
+            </>
+          )}
+          <FileMenuButton label="Rename" onClick={() => void renameEntry(menu.node).catch((error) => window.alert(String(error)))} />
+          <FileMenuButton label={menu.node.isDir ? "Download as ZIP" : "Download"} onClick={() => { setMenu(null); downloadPath(menu.node.fullPath, menu.node.isDir); }} />
+          <div style={{ height: 1, margin: "4px 3px", background: "var(--border)" }} />
+          <FileMenuButton danger label="Delete" onClick={() => void deleteEntry(menu.node).catch((error) => window.alert(String(error)))} />
+        </div>
+      )}
     </div>
   );
 });
+
+function FileMenuButton({ label, onClick, danger = false }: { label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      style={{
+        width: "100%",
+        height: 30,
+        padding: "0 9px",
+        border: "none",
+        borderRadius: 5,
+        background: "transparent",
+        color: danger ? "#ef4444" : "var(--text)",
+        cursor: "pointer",
+        textAlign: "left",
+        fontSize: 12,
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
+    >
+      {label}
+    </button>
+  );
+}
