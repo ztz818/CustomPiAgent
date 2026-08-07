@@ -122,13 +122,6 @@ pre, code {
 .auth-user-control button { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; }
 .auth-user-control button:hover { background: var(--bg-hover); color: var(--text); }
 @media (max-width: 640px) { .auth-user-name { max-width: 84px; } .auth-user-control { padding: 0 6px; } .auth-user-control button { padding: 0 6px; font-size: 11px; } }
-.file-workspace-toggle { position: fixed; top: calc(env(safe-area-inset-top) + 7px); right: calc(env(safe-area-inset-right) + 8px); z-index: 300; min-width: 124px; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel)); box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 650; }
-.file-workspace-toggle:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--bg-panel)); }
-.file-workspace-toggle.is-open { min-width: 36px; width: 36px; padding: 0; border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: color-mix(in srgb, var(--accent) 14%, var(--bg-panel)); font-size: 0; }
-.file-workspace-toggle-icon { display: grid; place-items: center; color: var(--accent); }
-.file-workspace-toggle-status { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.14); }
-.file-workspace-toggle.is-open .file-workspace-toggle-status { display: none; }
-.file-workspace-toggle.preview-expanded { display: none; }
 .file-preview-fullscreen-button { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 32px; margin-right: 50px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); cursor: pointer; }
 .file-preview-fullscreen-button:hover { background: var(--bg-hover); color: var(--text); }
 .right-panel-container.file-preview-expanded { position: fixed !important; inset: 0 !important; z-index: 1000 !important; width: 100vw !important; min-width: 0 !important; max-width: none !important; height: 100dvh !important; transform: none !important; border: 0 !important; background: var(--bg) !important; box-shadow: none !important; }

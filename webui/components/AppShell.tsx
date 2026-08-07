@@ -8,8 +8,6 @@ import { ChatWindow } from "./ChatWindow";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { ModelsConfig } from "./ModelsConfig";
-import { SkillsConfig } from "./SkillsConfig";
-import { PluginsConfig } from "./PluginsConfig";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator } from "./BranchNavigator";
 import { useTheme } from "@/hooks/useTheme";
@@ -68,8 +66,6 @@ export function AppShell() {
   const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
   const [modelsConfigOpen, setModelsConfigOpen] = useState(false);
   const [modelsRefreshKey, setModelsRefreshKey] = useState(0);
-  const [skillsConfigOpen, setSkillsConfigOpen] = useState(false);
-  const [pluginsConfigOpen, setPluginsConfigOpen] = useState(false);
   const [projectTrust, setProjectTrust] = useState<ProjectTrustStatus | null>(null);
   const [projectTrustDialogOpen, setProjectTrustDialogOpen] = useState(false);
   const [projectTrustBusy, setProjectTrustBusy] = useState(false);
@@ -678,31 +674,6 @@ export function AppShell() {
                 <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
                 <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
                 <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
-              </svg>
-            ),
-          },
-          {
-             label: translate("common.skills"),
-            onClick: () => setSkillsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                <path d="M2 17l10 5 10-5" />
-                <path d="M2 12l10 5 10-5" />
-              </svg>
-            ),
-          },
-          {
-             label: translate("common.plugins"),
-            onClick: () => setPluginsConfigOpen(true),
-            disabled: !activeCwd && !selectedSession?.cwd && !newSessionCwd,
-            icon: (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 7V2" />
-                <path d="M15 7V2" />
-                <path d="M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0Z" />
-                <path d="M12 19v3" />
               </svg>
             ),
           },
@@ -1681,24 +1652,6 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {/* Prominent entry for the file workspace and preview panel. */}
-    <button
-      onClick={() => setRightPanelOpen((v) => !v)}
-      aria-controls="file-panel"
-      aria-expanded={rightPanelOpen}
-      title={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
-      aria-label={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
-      className={`file-workspace-toggle${rightPanelOpen ? " is-open" : ""}${filePreviewExpanded ? " preview-expanded" : ""}`}
-    >
-      <span className="file-workspace-toggle-icon" aria-hidden="true">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2H19.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
-          <path d="M3 9h18" />
-        </svg>
-      </span>
-      <span>Workspace</span>
-      <span className="file-workspace-toggle-status" aria-hidden="true" />
-    </button>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (
       <ProjectTrustDialog
@@ -1709,17 +1662,6 @@ export function AppShell() {
           if (!projectTrustBusy) setProjectTrustDialogOpen(false);
         }}
         onConfirm={() => void handleTrustProject()}
-      />
-    )}
-    {skillsConfigOpen && projectTrustCwd && (
-      <SkillsConfig cwd={projectTrustCwd} onClose={() => setSkillsConfigOpen(false)} />
-    )}
-    {pluginsConfigOpen && projectTrustCwd && (
-      <PluginsConfig
-        cwd={projectTrustCwd}
-        sessionId={selectedSession?.id ?? null}
-        onClose={() => setPluginsConfigOpen(false)}
-        onReloaded={() => setSessionKey((k) => k + 1)}
       />
     )}
     </>

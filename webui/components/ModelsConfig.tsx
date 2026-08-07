@@ -1653,6 +1653,7 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
   const [config, setConfig] = useState<ModelsJson>({ providers: {} });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -1685,14 +1686,21 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     fetch("/api/models-config")
-      .then((r) => r.json())
-      .then((d: ModelsJson) => {
-        const normalized = d.providers ? d : { ...d, providers: {} };
+      .then(async (response) => {
+        const data = await response.json() as ModelsJson & { error?: string };
+        if (!response.ok || data.error) throw new Error(data.error ?? `HTTP ${response.status}`);
+        return data;
+      })
+      .then((data) => {
+        const normalized = data.providers ? data : { ...data, providers: {} };
         setConfig(normalized);
         const keys = Object.keys(normalized.providers ?? {});
         if (keys.length > 0) setSelection({ type: "provider", name: keys[0] });
       })
-      .catch(() => setConfig({ providers: {} }))
+      .catch((error) => {
+        setConfig({ providers: {} });
+        setLoadError(error instanceof Error ? error.message : String(error));
+      })
       .finally(() => setLoading(false));
     refreshAuthProviders();
   }, [refreshAuthProviders]);
@@ -1920,6 +1928,10 @@ export function ModelsConfig({ onClose }: { onClose: () => void }) {
               {/* Custom providers */}
               {loading ? (
                  <div style={{ padding: "10px 8px", fontSize: 12, color: "var(--text-muted)" }}>{t("i18n.loading")}</div>
+              ) : loadError ? (
+                <div style={{ margin: "8px", padding: "9px", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 6, color: "#ef4444", fontSize: 11, lineHeight: 1.45 }}>
+                  无法读取模型配置：{loadError}
+                </div>
               ) : providers.map(([pName, pData]) => {
                 const isProviderSelected = selection?.type === "provider" && selection.name === pName;
                 const models = pData.models ?? [];
