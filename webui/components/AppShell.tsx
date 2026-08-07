@@ -38,6 +38,7 @@ import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
 type SessionCopyField = "file" | "id";
+type CurrentUser = { id: string; username: string };
 type AutoNameStatus =
   | { kind: "idle" }
   | { kind: "naming" }
@@ -76,6 +77,7 @@ export function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [filePreviewExpanded, setFilePreviewExpanded] = useState(false);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
@@ -225,6 +227,23 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
     setActiveTopPanel("session");
   }, [isMobile]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/session/me")
+      .then((response) => response.ok ? response.json() as Promise<{ user?: CurrentUser }> : null)
+      .then((data) => {
+        if (!cancelled && data?.user) setCurrentUser(data.user);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await fetch("/api/session/logout", { method: "POST" }).catch(() => null);
+    router.replace("/login");
+    router.refresh();
+  }, [router]);
 
   const handleSidebarToggle = useCallback(() => {
     if (isMobile) setActiveTopPanel(null);
@@ -936,6 +955,12 @@ export function AppShell() {
                <path d="M14 18h6" />
              </svg>
            </button>
+          {currentUser && (
+            <div className="auth-user-control">
+              <span className="auth-user-name" title={currentUser.id}>{currentUser.username}</span>
+              <button type="button" onClick={() => void handleLogout()} title="退出登录" aria-label="退出登录">退出登录</button>
+            </div>
+          )}
           {showChat && projectTrust?.requiresTrust && !projectTrust.trusted && (
             <button
               type="button"
