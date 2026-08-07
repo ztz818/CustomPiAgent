@@ -1059,8 +1059,8 @@ type ExtensionCustomRequest = Extract<ExtensionUiRequest, { method: "custom" }>;
 
 function renderAnsiLine(line: string, keyPrefix: string): ReactNode[] {
   return parseAnsiLine(line).map((segment, index) => (
-    Object.keys(segment.style).length > 0
-      ? <span key={`${keyPrefix}-${index}`} style={segment.style}>{segment.text}</span>
+    Object.keys(segment.style ?? {}).length > 0
+      ? <span key={`${keyPrefix}-${index}`} style={segment.style ?? {}}>{segment.text}</span>
       : segment.text
   ));
 }

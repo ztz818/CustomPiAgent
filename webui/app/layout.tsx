@@ -54,6 +54,13 @@ export default function RootLayout({
             __html: `(function(){try{var t=localStorage.getItem("pi-theme");if(t==="dark")document.documentElement.classList.add("dark")}catch(e){}})();`,
           }}
         />
+        {process.env.NODE_ENV !== "production" && (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){if(!("serviceWorker" in navigator))return;var k="nova-dev-sw-cleanup";Promise.all([navigator.serviceWorker.getRegistrations().then(function(rs){return Promise.all(rs.map(function(r){return r.unregister()}))}),("caches" in window)?caches.keys().then(function(ks){return Promise.all(ks.filter(function(x){return x.indexOf("nova-lab-")===0||x.indexOf("pi-web-")===0}).map(function(x){return caches.delete(x)}))}):Promise.resolve()]).then(function(){if(navigator.serviceWorker.controller&&sessionStorage.getItem(k)!=="1"){sessionStorage.setItem(k,"1");location.reload()}else{sessionStorage.removeItem(k)}})})();`,
+            }}
+          />
+        )}
       </head>
       <body translate="no" className="notranslate">
         {children}

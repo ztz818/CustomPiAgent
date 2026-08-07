@@ -8,6 +8,11 @@ import * as XLSX from "xlsx";
 import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 import { getAuthorizedWorkspaces, ensureWorkspaceScaffold } from "@/lib/workspace-config";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
+import {
+  inspectUploadTargets,
+  parseUploadConflictStrategy,
+  validateUploadFileNames,
+} from "@/lib/file-upload";
 
 const require = createRequire(import.meta.url);
 const { ZipArchive } = require("archiver") as {
@@ -139,6 +144,27 @@ async function readDocxPreview(filePath: string, stat: fs.Stats) {
     })),
     size: stat.size,
   });
+}
+
+async function renderDocxPreview(filePath: string, stat: fs.Stats): Promise<Response> {
+  if (stat.size > 10 * 1024 * 1024) {
+    return NextResponse.json({ error: "DOCX too large for preview (>10MB)" }, { status: 413 });
+  }
+  const result = await mammoth.convertToHtml({ path: filePath });
+  const warnings = result.messages.map((message) => `<li>${escapeHtml(message.message)}</li>`).join("");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+    body { margin: 24px 32px; color: #1a1a1a; font: 14px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    img { max-width: 100%; height: auto; } table { border-collapse: collapse; max-width: 100%; }
+    td, th { border: 1px solid #d9d9d9; padding: 5px 8px; } blockquote { border-left: 3px solid #c7c7c7; margin-left: 0; padding-left: 12px; }
+    .preview-warnings { color: #8a5a00; font-size: 12px; border-bottom: 1px solid #ead9a3; padding-bottom: 8px; }
+  </style></head><body>${warnings ? `<ul class="preview-warnings">${warnings}</ul>` : ""}${result.value}</body></html>`;
+  return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" } });
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>\"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+  })[character] ?? character);
 }
 
 function readXlsxPreview(filePath: string, stat: fs.Stats) {
@@ -382,6 +408,27 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
+    if (type === "meta") {
+      if (!stat.isFile()) {
+        return NextResponse.json({ error: "Not a file" }, { status: 400 });
+      }
+      return NextResponse.json({
+        path: filePath,
+        name: path.basename(filePath),
+        size: stat.size,
+        modified: stat.mtime.toISOString(),
+        extension: getExt(filePath),
+      });
+    }
+
+    if (type === "preview") {
+      if (!stat.isFile()) {
+        return NextResponse.json({ error: "Not a file" }, { status: 400 });
+      }
+      if (getExt(filePath) === "docx") return renderDocxPreview(filePath, stat);
+      return NextResponse.json({ error: "Preview is not supported for this file type" }, { status: 415 });
+    }
+
     if (type === "read") {
       if (!stat.isFile()) {
         return NextResponse.json({ error: "Not a file" }, { status: 400 });
@@ -405,7 +452,7 @@ export async function GET(
       if (ext === "docx") {
         return readDocxPreview(filePath, stat);
       }
-      if (ext === "xlsx" || ext === "xls") {
+      if (ext === "xlsx" || ext === "xls" || ext === "csv") {
         return readXlsxPreview(filePath, stat);
       }
       return readTextPreview(filePath, stat);
@@ -537,6 +584,33 @@ export async function POST(
     if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
       return NextResponse.json({ error: "Target is not a directory" }, { status: 400 });
     }
+    const realDirPath = fs.realpathSync(dirPath);
+    const realAllowedRoots = new Set<string>();
+    for (const root of allowedRoots) {
+      try {
+        realAllowedRoots.add(fs.realpathSync(root));
+      } catch {
+        // Ignore stale workspace roots.
+      }
+    }
+    if (!isPathAllowed(realDirPath, realAllowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
+    if (type === "upload-check") {
+      const body = await request.json().catch(() => null) as { fileNames?: unknown } | null;
+      const fileNames = body && Array.isArray(body.fileNames) && body.fileNames.every((item) => typeof item === "string")
+        ? body.fileNames as string[]
+        : null;
+      if (!fileNames) {
+        return NextResponse.json({ error: "fileNames must be an array of strings" }, { status: 400 });
+      }
+      const validationError = validateUploadFileNames(fileNames);
+      if (validationError) {
+        return NextResponse.json({ error: validationError }, { status: 400 });
+      }
+      return NextResponse.json(inspectUploadTargets(realDirPath, fileNames));
+    }
 
     if (type === "mkdir" || type === "touch") {
       const body = await request.json() as { name?: string; overwrite?: boolean };
@@ -544,7 +618,7 @@ export async function POST(
       if (!isValidChildName(name)) {
         return NextResponse.json({ error: "Invalid name" }, { status: 400 });
       }
-      const target = path.join(dirPath, name);
+      const target = path.join(realDirPath, name);
       if (!isPathAllowed(target, allowedRoots)) {
         return NextResponse.json({ error: "Access denied" }, { status: 403 });
       }
@@ -560,6 +634,11 @@ export async function POST(
     }
 
     if (type === "upload") {
+      const strategy = parseUploadConflictStrategy(request.nextUrl.searchParams.get("conflict"));
+      if (!strategy) {
+        return NextResponse.json({ error: "Invalid conflict strategy" }, { status: 400 });
+      }
+
       let form: FormData;
       try {
         form = await parseFormDataWithinLimit(request, MAX_UPLOAD_REQUEST_BYTES);
@@ -569,7 +648,6 @@ export async function POST(
         }
         throw error;
       }
-      const overwrite = form.get("overwrite") === "true";
       const files = form.getAll("files").filter((item): item is File => item instanceof File);
       if (files.some((file) => file.size > MAX_UPLOAD_FILE_BYTES)) {
         return NextResponse.json({ error: "Each upload must be 25MB or smaller" }, { status: 413 });
@@ -577,30 +655,52 @@ export async function POST(
       if (files.reduce((total, file) => total + file.size, 0) > MAX_UPLOAD_TOTAL_BYTES) {
         return NextResponse.json({ error: "Uploads must total 100MB or less" }, { status: 413 });
       }
-      const conflicts: string[] = [];
+
+      const fileNames = files.map((file) => file.name);
+      const validationError = validateUploadFileNames(fileNames);
+      if (validationError) {
+        return NextResponse.json({ error: validationError }, { status: 400 });
+      }
+      const inspection = inspectUploadTargets(realDirPath, fileNames);
+      if (strategy === "error" && inspection.conflicts.length > 0) {
+        return NextResponse.json({
+          error: "One or more files already exist",
+          conflicts: inspection.conflicts,
+          nonReplaceable: inspection.nonReplaceable,
+        }, { status: 409 });
+      }
+
+      const conflictSet = new Set(inspection.conflicts);
+      const nonReplaceableSet = new Set(inspection.nonReplaceable);
       const uploaded: string[] = [];
+      const skipped: string[] = [];
+      const errors: Array<{ name: string; error: string }> = [];
 
       for (const file of files) {
-        if (!isValidChildName(file.name)) {
-          return NextResponse.json({ error: `Invalid file name: ${file.name}` }, { status: 400 });
-        }
-        const target = path.join(dirPath, file.name);
+        const target = path.join(realDirPath, file.name);
         if (!isPathAllowed(target, allowedRoots)) {
-          return NextResponse.json({ error: "Access denied" }, { status: 403 });
-        }
-        if (fs.existsSync(target) && !overwrite) {
-          conflicts.push(file.name);
+          errors.push({ name: file.name, error: "Access denied" });
           continue;
         }
-        const buffer = Buffer.from(await file.arrayBuffer());
-        fs.writeFileSync(target, buffer, { flag: overwrite ? "w" : "wx" });
-        uploaded.push(target);
+        if (conflictSet.has(file.name) && strategy === "skip") {
+          skipped.push(file.name);
+          continue;
+        }
+        if (conflictSet.has(file.name) && nonReplaceableSet.has(file.name)) {
+          errors.push({ name: file.name, error: "Cannot replace a directory or symbolic link" });
+          continue;
+        }
+
+        try {
+          const buffer = Buffer.from(await file.arrayBuffer());
+          fs.writeFileSync(target, buffer, { flag: conflictSet.has(file.name) ? "w" : "wx" });
+          uploaded.push(file.name);
+        } catch (error) {
+          errors.push({ name: file.name, error: error instanceof Error ? error.message : String(error) });
+        }
       }
 
-      if (conflicts.length > 0) {
-        return NextResponse.json({ error: "Conflicts", conflict: true, conflicts, uploaded }, { status: 409 });
-      }
-      return NextResponse.json({ ok: true, uploaded });
+      return NextResponse.json({ uploaded, skipped, errors }, { status: errors.length > 0 ? 207 : 200 });
     }
 
     return NextResponse.json({ error: "Unsupported action" }, { status: 400 });

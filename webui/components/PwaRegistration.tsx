@@ -4,7 +4,21 @@ import { useEffect } from "react";
 
 export function PwaRegistration() {
   useEffect(() => {
-    if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) {
+    if (!("serviceWorker" in navigator)) return;
+
+    if (process.env.NODE_ENV !== "production") {
+      void Promise.all([
+        navigator.serviceWorker.getRegistrations().then((registrations) =>
+          Promise.all(registrations.map((registration) => registration.unregister())),
+        ),
+        "caches" in window
+          ? caches.keys().then((keys) => Promise.all(
+              keys
+                .filter((key) => key.startsWith("nova-lab-") || key.startsWith("pi-web-"))
+                .map((key) => caches.delete(key)),
+            ))
+          : Promise.resolve([]),
+      ]);
       return;
     }
 

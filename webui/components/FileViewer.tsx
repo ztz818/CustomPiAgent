@@ -24,12 +24,14 @@ import { CodeBlock, MermaidBlock } from "./MermaidBlock";
 import { parseUnifiedPatch } from "@/lib/patch";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
+import { DocxDocumentPreview, PdfDocumentPreview } from "./DocumentPreview";
 import { OfficePreview } from "./OfficePreview";
 
 interface Props {
   filePath: string;
   cwd?: string;
   sourceSessionId?: string | null;
+  onExpandPreview?: () => void;
   onOpenFile?: (filePath: string) => void;
   onMentionLines?: (relativePath: string, startLine: number, endLine: number) => void;
   gitRefreshKey?: number;
@@ -662,24 +664,104 @@ function AudioViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
+interface XlsxSheetData {
+  name: string;
+  rows: Array<Array<string | number | boolean | null>>;
+  totalRows: number;
+  totalCols: number;
+  truncated: boolean;
+}
+
+interface XlsxPreviewData {
+  kind: "xlsx";
+  sheets: XlsxSheetData[];
+  size: number;
+}
+
+function WorkbookCompatibilityViewer({ filePath, sourceSessionId, onBack }: Props & { onBack?: () => void }) {
+  const { t } = useI18n();
+  const [data, setData] = useState<XlsxPreviewData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [activeSheet, setActiveSheet] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null);
+    setError(null);
+    setActiveSheet(0);
+    fetch(getFileApiUrl(filePath, "read", sourceSessionId))
+      .then(async (response) => {
+        const next = await response.json() as XlsxPreviewData & { error?: string };
+        if (!response.ok || next.error) throw new Error(next.error ?? `无法读取文件（${response.status}）`);
+        if (!cancelled) setData(next);
+      })
+      .catch((reason) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+      });
+    return () => { cancelled = true; };
+  }, [filePath, sourceSessionId]);
+
+  const sheet = data?.sheets[activeSheet] ?? data?.sheets[0];
+  return (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      <div style={{ height: 30, padding: "0 12px", display: "flex", alignItems: "center", borderBottom: "1px solid var(--border)", background: "var(--bg)", flexShrink: 0 }}>
+        {onBack && <button type="button" className="office-preview-text-button" onClick={onBack}>高保真视图</button>}
+        <span style={{ color: "var(--text-muted)", fontSize: 11 }}>表格预览</span>
+        {sheet && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 11 }}>{sheet.totalRows} 行 × {sheet.totalCols} 列{sheet.truncated ? " · 预览已截断" : ""}</span>}
+      </div>
+      {error ? (
+        <div style={{ flex: 1, display: "grid", placeItems: "center", color: "#f87171", fontSize: 13 }}>{error}</div>
+      ) : !data ? (
+        <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: 13 }}>{t("i18n.loading")}</div>
+      ) : !sheet ? (
+        <div style={{ padding: 24, color: "var(--text-dim)", fontSize: 13 }}>没有可显示的工作表</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: 6, padding: "8px 12px", borderBottom: "1px solid var(--border)", background: "var(--bg-panel)", overflowX: "auto", flexShrink: 0 }}>
+            {data.sheets.map((item, index) => (
+              <button key={item.name} type="button" onClick={() => setActiveSheet(index)} className="office-preview-text-button" style={{ color: index === activeSheet ? "var(--accent)" : "var(--text-muted)" }}>{item.name}</button>
+            ))}
+          </div>
+          <div style={{ flex: 1, overflow: "auto", background: "var(--bg)" }}>
+            <table style={{ borderCollapse: "collapse", fontSize: 12, minWidth: "100%" }}>
+              <tbody>{sheet.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  <th style={{ position: "sticky", left: 0, zIndex: 1, minWidth: 44, padding: "4px 8px", textAlign: "right", color: "var(--text-dim)", background: "var(--bg-panel)", border: "1px solid var(--border)", fontWeight: 500 }}>{rowIndex + 1}</th>
+                  {row.map((cell, colIndex) => <td key={colIndex} title={String(cell ?? "")} style={{ border: "1px solid var(--border)", color: "var(--text)", maxWidth: 260, minWidth: 96, overflow: "hidden", padding: "4px 8px", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(cell ?? "")}</td>)}
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DocumentViewer({ filePath, cwd, sourceSessionId, onExpandPreview }: Props) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [compatibilityView, setCompatibilityView] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   const ext = getFileExt(filePath);
   const isPdf = ext === "pdf";
-  const previewUrl = isPdf
-    ? getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined)
-    : getFileApiUrl(filePath, "preview", sourceSessionId, bust ? { v: bust } : undefined);
+  const sourceUrl = getFileApiUrl(filePath, "download", sourceSessionId, bust ? { v: bust } : undefined);
+  const compatibilityUrl = getFileApiUrl(
+    filePath,
+    isPdf ? "read" : "preview",
+    sourceSessionId,
+    bust ? { v: bust } : undefined,
+  );
 
   useEffect(() => {
     setBust(0);
     setSize(null);
     setError(null);
+    setCompatibilityView(false);
     setWatching(false);
 
     if (esRef.current) {
@@ -745,7 +827,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
         <span style={{ fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={filePath}>
           {getRelativeFilePath(filePath, cwd)}
         </span>
-        <span style={{ marginLeft: "auto" }}>{ext === "docx" ? "docx preview" : "pdf"}</span>
+        <span style={{ marginLeft: "auto" }}>{ext === "docx" ? "Word" : "PDF"}</span>
         {size != null && <span>{formatSize(size)}</span>}
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
         <span
@@ -770,13 +852,36 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
           <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, color: "#f87171", fontSize: 13, textAlign: "center" }}>
             {error}
           </div>
+        ) : compatibilityView ? (
+          <div style={{ position: "relative", width: "100%", height: "100%" }}>
+            <button
+              type="button"
+              className="document-compatibility-back"
+              onClick={() => setCompatibilityView(false)}
+            >
+              高保真视图
+            </button>
+            <iframe
+              key={compatibilityUrl}
+              src={compatibilityUrl}
+              sandbox={isPdf ? undefined : "allow-same-origin"}
+              title={t("i18n.previewFile", { file: getFileName(filePath) })}
+              style={{ width: "100%", height: "100%", border: "none", background: isPdf ? "var(--bg)" : "#eef1f5" }}
+            />
+          </div>
+        ) : isPdf ? (
+          <PdfDocumentPreview
+            sourceUrl={sourceUrl}
+            fileName={getFileName(filePath)}
+            onUseCompatibilityView={() => setCompatibilityView(true)}
+            onExpandPreview={onExpandPreview}
+          />
         ) : (
-          <iframe
-            key={previewUrl}
-            src={previewUrl}
-            sandbox={isPdf ? undefined : "allow-same-origin"}
-            title={t("i18n.previewFile", { file: getFileName(filePath) })}
-            style={{ width: "100%", height: "100%", border: "none", background: isPdf ? "var(--bg)" : "#eef1f5" }}
+          <DocxDocumentPreview
+            sourceUrl={sourceUrl}
+            fileName={getFileName(filePath)}
+            onUseCompatibilityView={() => setCompatibilityView(true)}
+            onExpandPreview={onExpandPreview}
           />
         )}
       </div>
@@ -784,10 +889,16 @@ function DocumentViewer({ filePath, cwd, sourceSessionId }: Props) {
   );
 }
 
-export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
+export function FileViewer({ filePath, cwd, sourceSessionId, onExpandPreview, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {
   const officeExt = getFileExt(filePath);
-  if (officeExt === "xlsx" || officeExt === "xls" || officeExt === "pptx") {
-    return <OfficePreview filePath={filePath} cwd={cwd} kind={officeExt === "pptx" ? "pptx" : "excel"} />;
+  if (officeExt === "xlsx" || officeExt === "xls") {
+    return <ExcelFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onExpandPreview={onExpandPreview} />;
+  }
+  if (officeExt === "csv") {
+    return <WorkbookCompatibilityViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
+  }
+  if (officeExt === "pptx") {
+    return <OfficePreview filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} kind="pptx" onExpandPreview={onExpandPreview} />;
   }
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
@@ -799,6 +910,14 @@ export function FileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMenti
     return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} />;
   }
   return <TextFileViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} onMentionLines={onMentionLines} gitRefreshKey={gitRefreshKey} initialDisplayMode={initialDisplayMode} />;
+}
+
+function ExcelFileViewer({ filePath, cwd, sourceSessionId, onExpandPreview }: Props) {
+  const [compatibilityView, setCompatibilityView] = useState(false);
+  if (compatibilityView) {
+    return <WorkbookCompatibilityViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} onBack={() => setCompatibilityView(false)} />;
+  }
+  return <OfficePreview filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} kind="excel" onUseCompatibilityView={() => setCompatibilityView(true)} onExpandPreview={onExpandPreview} />;
 }
 
 function TextFileViewer({ filePath, cwd, sourceSessionId, onOpenFile, onMentionLines, gitRefreshKey, initialDisplayMode }: Props) {

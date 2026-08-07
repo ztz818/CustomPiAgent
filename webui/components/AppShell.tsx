@@ -75,6 +75,7 @@ export function AppShell() {
   const [projectTrustError, setProjectTrustError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [filePreviewExpanded, setFilePreviewExpanded] = useState(false);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
   const rightPanelWidthRef = useRef(RIGHT_PANEL_FALLBACK_WIDTH);
@@ -142,6 +143,17 @@ export function AppShell() {
     reclampSidebarWidth();
     reclampRightPanelWidth();
   }, [reclampRightPanelWidth, reclampSidebarWidth, rightPanelOpen]);
+  useEffect(() => {
+    if (!filePreviewExpanded) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setFilePreviewExpanded(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [filePreviewExpanded]);
+  const toggleFilePreviewExpanded = useCallback(() => {
+    setFilePreviewExpanded((expanded) => !expanded);
+  }, []);
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
   const languageBtnRef = useRef<HTMLButtonElement>(null);
@@ -1558,13 +1570,23 @@ export function AppShell() {
       <div
         ref={rightPanelResizer.panelRef}
         id="file-panel"
-        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}`}
+        className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}${filePreviewExpanded ? " file-preview-expanded" : ""}`}
         style={{
           "--right-panel-width": `${rightPanelResizer.width}px`,
           display: "flex",
           flexDirection: "column",
           borderLeft: "1px solid var(--border)",
           background: "var(--bg)",
+          ...(filePreviewExpanded ? {
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            width: "100vw",
+            minWidth: 0,
+            maxWidth: "none",
+            height: "100dvh",
+            transform: "none",
+          } : {}),
         } as React.CSSProperties}
       >
         {/* Right panel tab bar */}
@@ -1574,6 +1596,8 @@ export function AppShell() {
           flexShrink: 0,
           height: "calc(36px + env(safe-area-inset-top))",
           paddingTop: "env(safe-area-inset-top)",
+          width: filePreviewExpanded ? "100%" : undefined,
+          minWidth: filePreviewExpanded ? 0 : undefined,
           background: "var(--bg-panel)",
           borderBottom: "1px solid var(--border)",
         }}>
@@ -1585,16 +1609,36 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
-
+          {activeFileTab?.filePath && (
+            <button
+              type="button"
+              className="file-preview-fullscreen-button"
+              onClick={toggleFilePreviewExpanded}
+              title={filePreviewExpanded ? "退出沉浸预览" : "沉浸预览"}
+              aria-label={filePreviewExpanded ? "退出沉浸预览" : "沉浸预览"}
+            >
+              {filePreviewExpanded ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M8 3v5H3M16 3v5h5M8 21v-5H3M16 21v-5h5" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M21 16v5h-5" />
+                </svg>
+              )}
+            </button>
+          )}
         </div>
 
         {/* File content */}
-        <div style={{ flex: 1, overflow: "hidden", paddingBottom: "env(safe-area-inset-bottom)" }}>
+        <div style={{ flex: 1, overflow: "hidden", paddingBottom: "env(safe-area-inset-bottom)", width: filePreviewExpanded ? "100%" : undefined, minWidth: filePreviewExpanded ? 0 : undefined }}>
           {activeFileTab?.filePath ? (
             <FileViewer
+              key={`${activeFileTab.filePath}:${filePreviewExpanded ? "expanded" : "panel"}`}
               filePath={activeFileTab.filePath}
               cwd={activeCwd ?? undefined}
               sourceSessionId={activeFileTab.sourceSessionId}
+              onExpandPreview={() => setFilePreviewExpanded(true)}
               gitRefreshKey={explorerRefreshKey}
               initialDisplayMode={activeFileTab.initialDisplayMode}
               onMentionLines={rightPanelOpen ? handleFileLineMention : undefined}
@@ -1612,27 +1656,23 @@ export function AppShell() {
         </div>
       </div>
     </div>
-    {/* File panel toggle — always visible at top-right */}
+    {/* Prominent entry for the file workspace and preview panel. */}
     <button
       onClick={() => setRightPanelOpen((v) => !v)}
-       aria-controls="file-panel"
-       aria-expanded={rightPanelOpen}
-       title={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
-       aria-label={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
-      style={{
-        position: "fixed", top: "env(safe-area-inset-top)", right: "env(safe-area-inset-right)", zIndex: 300,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: 36, height: 36, padding: 0,
-        background: "var(--bg-panel)", border: "none", borderLeft: "1px solid var(--border)", borderBottom: "1px solid var(--border)",
-        color: rightPanelOpen ? "var(--text)" : "var(--text-muted)",
-        cursor: "pointer", transition: "color 0.12s",
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.color = rightPanelOpen ? "var(--text)" : "var(--text-muted)"; }}
+      aria-controls="file-panel"
+      aria-expanded={rightPanelOpen}
+      title={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
+      aria-label={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
+      className={`file-workspace-toggle${rightPanelOpen ? " is-open" : ""}${filePreviewExpanded ? " preview-expanded" : ""}`}
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="15" y1="3" x2="15" y2="21" />
-      </svg>
+      <span className="file-workspace-toggle-icon" aria-hidden="true">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2H19.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
+          <path d="M3 9h18" />
+        </svg>
+      </span>
+      <span>Workspace</span>
+      <span className="file-workspace-toggle-status" aria-hidden="true" />
     </button>
     {modelsConfigOpen && <ModelsConfig onClose={() => { setModelsConfigOpen(false); setModelsRefreshKey((k) => k + 1); }} />}
     {projectTrustDialogOpen && projectTrustCwd && (

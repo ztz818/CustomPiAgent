@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "@js-preview/excel/lib/index.css";
+@import "react-pdf/dist/Page/AnnotationLayer.css";
+@import "react-pdf/dist/Page/TextLayer.css";
 
 @theme {
   --color-bg: var(--bg);
@@ -114,6 +117,63 @@ pre, code {
   font-family: var(--font-mono);
 }
 
+.file-workspace-toggle { position: fixed; top: calc(env(safe-area-inset-top) + 7px); right: calc(env(safe-area-inset-right) + 8px); z-index: 300; min-width: 124px; height: 36px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border)); border-radius: 7px; background: color-mix(in srgb, var(--accent) 9%, var(--bg-panel)); box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 650; }
+.file-workspace-toggle:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--bg-panel)); }
+.file-workspace-toggle.is-open { min-width: 36px; width: 36px; padding: 0; border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: color-mix(in srgb, var(--accent) 14%, var(--bg-panel)); font-size: 0; }
+.file-workspace-toggle-icon { display: grid; place-items: center; color: var(--accent); }
+.file-workspace-toggle-status { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.14); }
+.file-workspace-toggle.is-open .file-workspace-toggle-status { display: none; }
+.file-workspace-toggle.preview-expanded { display: none; }
+.file-preview-fullscreen-button { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 32px; margin-right: 50px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text-muted); cursor: pointer; }
+.file-preview-fullscreen-button:hover { background: var(--bg-hover); color: var(--text); }
+.right-panel-container.file-preview-expanded { position: fixed !important; inset: 0 !important; z-index: 1000 !important; width: 100vw !important; min-width: 0 !important; max-width: none !important; height: 100dvh !important; transform: none !important; border: 0 !important; background: var(--bg) !important; box-shadow: none !important; }
+.right-panel-container.file-preview-expanded > * { width: 100% !important; min-width: 0 !important; }
+.right-panel-container.file-preview-expanded .file-preview-fullscreen-button { margin-right: 6px; }
+.right-panel-container.file-preview-expanded > div:last-child { min-height: 0; }
+.office-preview-shell { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+.office-preview-header { min-height: 29px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--text-dim); font-size: 11px; }
+.office-preview-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); }
+.office-preview-status { margin-left: auto; color: var(--accent); }
+.office-preview-text-button, .office-preview-fallback-button { border: 1px solid var(--border); border-radius: 6px; background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font: inherit; padding: 3px 8px; }
+.office-preview-text-button { margin-left: auto; }
+.office-preview-text-button:hover, .office-preview-fallback-button:hover { background: var(--bg-hover); color: var(--text); }
+.office-preview-zoom, .office-preview-pagination { display: flex; align-items: center; gap: 7px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.office-preview-zoom { margin-left: auto; }
+.office-preview-zoom button, .office-preview-pagination button { min-width: 24px; height: 24px; display: grid; place-items: center; padding: 0 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-panel); color: var(--text-muted); cursor: pointer; }
+.office-preview-zoom button:hover:not(:disabled), .office-preview-pagination button:hover { background: var(--bg-hover); color: var(--text); }
+.office-preview-zoom button:disabled { cursor: default; opacity: 0.4; }
+.office-preview-error { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.office-preview-error strong { color: var(--error, #d93025); font-size: 13px; }
+.office-preview-canvas { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.office-preview-excel { padding: 8px; }
+.office-preview-excel .vue-office-excel, .office-preview-excel .vue-office-excel-main, .office-preview-excel .x-spreadsheet { width: 100%; height: 100%; min-height: 320px; }
+.office-preview-excel .x-spreadsheet { color: var(--text); background: var(--bg); }
+.office-preview-pptx { padding: 16px; overflow: auto; background: #dfe2e6; }
+.office-preview-pptx-stage { position: relative; margin: auto; flex: 0 0 auto; }
+.office-preview-pptx-render { position: absolute; inset: 0 auto auto 0; overflow: hidden; transform-origin: top left; background: #fff; box-shadow: 0 2px 9px rgba(0, 0, 0, 0.16); }
+.office-preview-pptx .pptx-preview-wrapper-next, .office-preview-pptx .pptx-preview-wrapper-pagination { display: none; }
+
+.document-native-preview { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-panel); }
+.document-native-toolbar { min-height: 34px; display: flex; align-items: center; gap: 7px; flex-shrink: 0; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--bg); color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.document-native-toolbar button, .document-native-error button, .document-compatibility-back { height: 24px; display: inline-grid; place-items: center; padding: 0 7px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg-panel); color: var(--text-muted); cursor: pointer; font: inherit; }
+.document-native-toolbar button:hover:not(:disabled), .document-native-error button:hover, .document-compatibility-back:hover { background: var(--bg-hover); color: var(--text); }
+.document-native-toolbar button:disabled { cursor: default; opacity: 0.4; }
+.document-native-toolbar-separator { width: 1px; height: 16px; margin: 0 2px; background: var(--border); }
+.document-native-compatibility { margin-left: auto; }
+.document-native-status-inline { color: var(--accent); }
+.document-native-viewport { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.document-native-pdf { padding: 20px; background: #dfe2e6; }
+.document-native-pdf .react-pdf__Document { display: flex; justify-content: center; min-width: min-content; }
+.document-native-pdf .react-pdf__Page { overflow: hidden; background: #fff; box-shadow: 0 2px 9px rgba(0, 0, 0, 0.14); }
+.document-native-pdf .react-pdf__Page canvas { display: block; max-width: none; }
+.document-native-docx { padding: 20px; background: #dfe2e6; }
+.document-native-docx .docx-wrapper { min-height: 100%; padding: 20px; background: transparent; }
+.document-native-docx .docx-wrapper > section.docx-native-page { margin: 0 auto 20px; box-shadow: 0 2px 9px rgba(0, 0, 0, 0.14); }
+.document-native-status { display: grid; min-height: 160px; place-items: center; color: var(--text-muted); font-size: 12px; }
+.document-native-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 18px; padding: 14px; border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); font-size: 12px; }
+.document-native-error strong { color: var(--error, #d93025); }
+.document-compatibility-back { position: absolute; z-index: 2; top: 8px; right: 12px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12); }
+
 /* Hidden legacy session controls: history, title, branches, and system prompt. */
 .legacy-session-header-actions { display: none !important; }
 
@@ -128,9 +188,7 @@ pre, code {
 .nova-scenario-card { min-height: 164px; display: flex; flex-direction: column; align-items: flex-start; padding: 20px; border: 0; border-radius: 8px; color: #37352f; cursor: pointer; text-align: left; transition: transform 160ms ease, box-shadow 160ms ease; }
 .nova-scenario-card:hover { transform: translateY(-2px); box-shadow: 0 5px 14px rgba(15, 15, 15, 0.09); }
 
-/* Make the selected workspace read as a prominent workspace tile. */
-.workspace-picker-tile { min-height: 72px; padding: 12px 14px !important; border: 0 !important; border-radius: 8px !important; background: #dcecfa !important; color: #37352f !important; box-shadow: 0 2px 8px rgba(55, 53, 47, 0.08); }
-.workspace-picker-tile:hover { box-shadow: 0 5px 14px rgba(55, 53, 47, 0.12); }
+/* Legacy workspace picker is gated off in SessionSidebar. */
 .workspace-project-option { min-height: 58px; margin: 4px 6px; width: calc(100% - 12px) !important; border-radius: 7px !important; background: color-mix(in srgb, #dcecfa 42%, var(--bg)) !important; }
 .workspace-project-option:nth-child(2n) { background: color-mix(in srgb, #d9f3e1 42%, var(--bg)) !important; }
 .workspace-project-option:nth-child(3n) { background: color-mix(in srgb, #ffe8d4 42%, var(--bg)) !important; }

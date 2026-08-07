@@ -384,6 +384,7 @@ function NovaLabTitle() {
 }
 
 export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onOpenFile, explorerRefreshKey, onExplorerRefresh, onAtMention, onAtMentions }: Props) {
+  const directorySelectionEnabled = false;
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -861,7 +862,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-      {customPathOpen && (
+      {directorySelectionEnabled && customPathOpen && (
         <DirectoryPicker
           busy={customPathValidating}
           error={customPathError}
@@ -963,10 +964,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </div>
         </div>
 
-        {/* CWD picker */}
-        <div ref={dropdownRef} style={{ position: "relative" }}>
+        {/* Workspace is assigned by the platform; users cannot choose directories here. */}
+        {directorySelectionEnabled && <div ref={dropdownRef} style={{ position: "relative" }}>
           <button
             onClick={() => setDropdownOpen((v) => !v)}
+            aria-expanded={dropdownOpen}
             title={selectedProject ?? selectedCwd ?? ""}
             className="workspace-picker-tile"
             style={{
@@ -984,31 +986,27 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               transition: "border-color 0.15s, background 0.15s",
             }}
           >
-            {selectedCwd ? (
-              <PathLabel
-                text={displayCwd(selectedProject ?? selectedCwd, homeDir)}
-                style={{
-                  flex: 1,
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  color: "var(--text)",
-                }}
-              />
-            ) : (
-              <span
-                style={{
-                  flex: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  color: "var(--text-dim)",
-                }}
-              >
-                 {initialSessionId && !restoredRef.current ? "" : t("sidebar.selectProject")}
-              </span>
-            )}
+            <span className="workspace-picker-icon" aria-hidden="true">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h5l2 2H19.5A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" />
+                <path d="M3 9h18" />
+              </svg>
+            </span>
+            <span className="workspace-picker-content">
+              <span className="workspace-picker-label"><span className="workspace-picker-status" />当前 Workspace</span>
+              {selectedCwd ? (
+                <span className="workspace-picker-name">
+                  <PathLabel text={displayCwd(selectedProject ?? selectedCwd, homeDir)} />
+                </span>
+              ) : (
+                <span className="workspace-picker-name workspace-picker-empty">
+                  {initialSessionId && !restoredRef.current ? "" : t("sidebar.selectProject")}
+                </span>
+              )}
+            </span>
+            <svg className="workspace-picker-chevron" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
           </button>
 
           <AnimatedDropdown
@@ -1154,7 +1152,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 <span>{t("sidebar.customPath")}</span>
               </button>
           </AnimatedDropdown>
-        </div>
+        </div>}
 
         {/* Worktree switcher — shown only for git projects at a checkout top
             level (repo subdirs keep their own project identity, so switching
