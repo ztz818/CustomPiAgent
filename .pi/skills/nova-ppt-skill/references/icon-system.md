@@ -23,7 +23,7 @@ Nova 自带一套本地 SVG 矢量资产，用于构建页面图标、流程符�
 
 按页面任务选图标，而不是按“看起来好看”选图标：
 
-- 类别/服务：选能直接表达对象的名词图标，例如筛查用 `clipboard`，康复用 `activity`/`walk`，安护用 `shield`/`bell`。
+- 类别/服务：选能直接表达对象的名词图标，例如筛查用 `clipboard`，康复在实心家族中用 `device-heart-monitor`，在线性家族中用 `activity`/`walk`，安护用 `shield`/`bell`。
 - 流程/动作：选动作或状态图标，例如 `check`、`phone-call`、`calendar`、`alert-triangle`，并沿主轴排列。
 - 风险/边界：选 `shield`、`alert`、`lock` 等图标，配合风险色或边界说明，不要用来装饰普通段落。
 - 医疗/照护：优先使用 `tabler-filled` 或 `phosphor-duotone`，保持亲和与可识别；只有需要技术骨架时才用 `chunk-filled`。

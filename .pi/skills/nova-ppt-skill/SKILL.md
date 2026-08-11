@@ -137,9 +137,26 @@ UV_CACHE_DIR=./uv_cache uv run python \
 
 必读：[素材系统](references/asset-system.md)。
 
-### 6. 编写页面规格
+### 6. 先完成设计协议，再写页面规格
 
-规格必须遵循 [页面规格说明](references/deck-spec.md) 和 [JSON Schema](schemas/deck-spec.schema.json)。
+必读 [设计协议](references/design-protocol.md)。先在规格中写全篇 `design` 和每页的 `layout_id`、`visual_job`、`visual_anchor`、`asset_plan`、`text_budget`，再写坐标和对象。
+
+如果提供参考 PPTX，必须先提取结构和视觉语法，记录参考页码和借鉴规则。不能只读取参考稿文本，也不能把三页任务机械拆成三个产品页。
+
+图标必须先用 CLI 检索真实文件：
+
+```bash
+UV_CACHE_DIR=./uv_cache uv run python \
+  .pi/skills/nova-ppt-skill/scripts/nova_ppt_cli.py icons \
+  --family <icon-family> --query <semantic-keyword>
+```
+
+`asset_plan.icons` 中列出的图标必须在 `elements` 中以 `type: "icon"` 出现；图标、主视觉、连接线和节点要在填入正文之前完成规划。
+
+### 7. 编写页面规格
+
+规格必须遵循 [页面规格说明](references/deck-spec.md)、[设计协议](references/design-protocol.md) 和 [JSON Schema](schemas/deck-spec.schema.json)。
+
 
 不可妥协的规则：
 
@@ -152,7 +169,7 @@ UV_CACHE_DIR=./uv_cache uv run python \
 - 图片和图标必须有有效替代文本。
 - 重复结构使用一致的尺寸和间距。
 
-### 7. 构建和检查
+### 8. 构建和检查
 
 先运行 `lint`，再运行 `build`。构建器会创建 PPTX、校验文件结构、扫描版面问题并输出统计信息。
 
@@ -170,7 +187,7 @@ UV_CACHE_DIR=./uv_cache uv run python \
 
 必读：[质量门](references/quality-gates.md)。
 
-### 8. 交付
+### 9. 交付
 
 交付内容包括：
 

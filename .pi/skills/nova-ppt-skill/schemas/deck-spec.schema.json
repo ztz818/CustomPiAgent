@@ -2,19 +2,34 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Nova PPT Deck Specification",
   "type": "object",
-  "required": ["meta", "slides"],
+  "required": ["meta", "design", "slides"],
   "additionalProperties": false,
   "properties": {
     "meta": {
       "type": "object",
-      "required": ["title"],
+      "required": ["title", "audience", "core_message"],
       "properties": {
         "title": {"type": "string", "minLength": 1},
-        "audience": {"type": "string"},
-        "core_message": {"type": "string"},
+        "audience": {"type": "string", "minLength": 1},
+        "purpose": {"type": "string"},
+        "core_message": {"type": "string", "minLength": 1},
         "language": {"type": "string", "default": "zh-CN"}
       },
       "additionalProperties": true
+    },
+    "design": {
+      "type": "object",
+      "required": ["style_id", "grid", "icon_family"],
+      "properties": {
+        "style_id": {"type": "string"},
+        "grid": {"type": "string", "default": "8pt"},
+        "icon_family": {"type": "string"},
+        "reference_deck": {"type": "string"},
+        "reference_slides": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+        "reference_grammar": {"type": "array", "items": {"type": "string"}},
+        "composition_rules": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
     },
     "canvas": {
       "type": "object",
@@ -29,11 +44,38 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "role", "message", "elements"],
+        "required": ["name", "role", "message", "layout_id", "visual_job", "visual_anchor", "asset_plan", "elements"],
         "properties": {
           "name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
-          "role": {"type": "string"},
-          "message": {"type": "string"},
+          "role": {
+            "enum": ["cover", "section", "thesis", "framework", "comparison", "process", "timeline", "data", "table", "case", "decision", "closing"]
+          },
+          "message": {"type": "string", "minLength": 1},
+          "evidence": {"type": "array", "items": {"type": "string"}},
+          "layout_id": {"type": "string"},
+          "density": {"enum": ["low", "medium", "high"]},
+          "visual_job": {"type": "string", "minLength": 1},
+          "visual_anchor": {"type": "string", "minLength": 1},
+          "asset_plan": {
+            "type": "object",
+            "required": ["native", "icons", "pictures"],
+            "properties": {
+              "native": {"type": "array", "items": {"type": "string"}},
+              "icons": {"type": "array", "items": {"type": "string"}},
+              "pictures": {"type": "array", "items": {"type": "string"}},
+              "motifs": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": false
+          },
+          "text_budget": {
+            "type": "object",
+            "properties": {
+              "title_max_chars": {"type": "integer", "minimum": 1},
+              "body_max_lines": {"type": "integer", "minimum": 1},
+              "max_text_blocks": {"type": "integer", "minimum": 1}
+            },
+            "additionalProperties": false
+          },
           "background": {"type": "string"},
           "transition": {"type": "string"},
           "advanceTime": {"type": ["integer", "string"]},
@@ -46,9 +88,7 @@
               "type": "object",
               "required": ["type", "props"],
               "properties": {
-                "type": {
-                  "enum": ["shape", "textbox", "picture", "table", "chart", "connector", "group", "notes", "icon"]
-                },
+                "type": {"enum": ["shape", "textbox", "picture", "table", "chart", "connector", "group", "notes", "icon"]},
                 "icon": {"type": "string"},
                 "color": {"type": "string", "pattern": "^#?[0-9A-Fa-f]{6}$"},
                 "props": {"type": "object"}

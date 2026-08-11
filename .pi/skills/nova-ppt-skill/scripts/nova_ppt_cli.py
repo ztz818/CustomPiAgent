@@ -28,6 +28,7 @@ PASS_TYPES = {
     "group",
     "notes",
 }
+DESIGN_ROLES = {"cover", "section", "thesis", "framework", "comparison", "process", "timeline", "data", "table", "case", "decision", "closing"}
 
 
 @dataclass
@@ -118,6 +119,14 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
     generic_icon_families: set[str] = set()
     slide_names: set[str] = set()
 
+    design = spec.get("design")
+    if not isinstance(design, dict):
+        findings.append(Finding("warning", "design", "缺少全篇设计协议：style_id、grid、icon_family 和参考语法"))
+    else:
+        for key in ("style_id", "grid", "icon_family"):
+            if not design.get(key):
+                findings.append(Finding("warning", f"design.{key}", "缺少全篇设计决定"))
+
     for slide_index, slide in enumerate(slides, start=1):
         location = f"slide[{slide_index}]"
         if not isinstance(slide, dict):
@@ -132,8 +141,13 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
             slide_names.add(slide_name)
         if not slide.get("role"):
             findings.append(Finding("warning", location, "缺少页面角色 role"))
+        elif slide.get("role") not in DESIGN_ROLES:
+            findings.append(Finding("warning", location, f"页面角色未在设计协议中定义：{slide.get('role')}"))
         if not slide.get("message"):
             findings.append(Finding("warning", location, "缺少单页结论 message"))
+        for design_key in ("layout_id", "visual_job", "visual_anchor", "asset_plan"):
+            if not slide.get(design_key):
+                findings.append(Finding("warning", f"{location}.{design_key}", "缺少页面设计决定"))
 
         elements = slide.get("elements", [])
         if not isinstance(elements, list):
@@ -144,6 +158,7 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
 
         object_names: set[str] = set()
         has_title_signal = False
+        actual_icons: set[str] = set()
         for element_index, element in enumerate(elements, start=1):
             element_location = f"{location}.elements[{element_index}]"
             if not isinstance(element, dict):
@@ -173,6 +188,8 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
 
             if element_type == "icon":
                 icon_id = element.get("icon")
+                if isinstance(icon_id, str):
+                    actual_icons.add(icon_id)
                 if not isinstance(icon_id, str):
                     findings.append(Finding("error", element_location, "图标元素缺少 icon"))
                 else:
@@ -214,6 +231,12 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
                 assert element_width is not None and element_height is not None
                 if x < -0.5 or y < -0.5 or x + element_width > CANVAS_WIDTH_PT + 0.5 or y + element_height > CANVAS_HEIGHT_PT + 0.5:
                     findings.append(Finding("error", element_location, "对象越出 960×540pt 画布"))
+
+        asset_plan = slide.get("asset_plan")
+        planned_icons = set(asset_plan.get("icons", [])) if isinstance(asset_plan, dict) and isinstance(asset_plan.get("icons", []), list) else set()
+        missing_planned_icons = planned_icons - actual_icons
+        if missing_planned_icons:
+            findings.append(Finding("warning", location, f"素材计划中的图标未落到元素：{', '.join(sorted(missing_planned_icons))}"))
 
         if not has_title_signal and slide.get("role") not in {"cover", "section", "closing"}:
             findings.append(Finding("warning", location, "未发现名称中含 title/headline 的标题对象"))
@@ -274,6 +297,32 @@ def print_findings(findings: list[Finding]) -> None:
 def ensure_runtime() -> None:
     if shutil.which("officecli") is None:
         raise RuntimeError("未找到 PPTX 构建运行时，请确认 officecli 可执行文件位于 PATH")
+
+
+def command_icons(args: argparse.Namespace) -> int:
+    families = sorted(path.name for path in ICON_ROOT.iterdir() if path.is_dir())
+    selected = families if args.family == "all" else [args.family]
+    missing = [family for family in selected if family not in families]
+    if missing:
+        print(f"[ERROR] 未知图标家族：{', '.join(missing)}", file=sys.stderr)
+        print(f"可用家族：{', '.join(families)}", file=sys.stderr)
+        return 1
+
+    terms = [term.lower() for term in re.split(r"[\s,]+", args.query.strip()) if term]
+    matches: list[str] = []
+    for family in selected:
+        for source in sorted((ICON_ROOT / family).glob("*.svg")):
+            stem = source.stem.lower()
+            if all(term in stem for term in terms):
+                matches.append(f"{family}/{source.stem}")
+    for icon_id in matches[: args.limit]:
+        print(icon_id)
+    if len(matches) > args.limit:
+        print(f"... 共 {len(matches)} 个结果，仅显示前 {args.limit} 个", file=sys.stderr)
+    if not matches:
+        print("未找到匹配图标。可缩短关键词或使用 --family all。", file=sys.stderr)
+        return 1
+    return 0
 
 
 def command_lint(args: argparse.Namespace) -> int:
@@ -347,6 +396,12 @@ def command_build(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Nova PPT 原生演示稿构建器")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    icons_parser = subparsers.add_parser("icons", help="检索本地 SVG 图标资产")
+    icons_parser.add_argument("--query", required=True, help="文件名关键词，例如 shield、walk、calendar")
+    icons_parser.add_argument("--family", default="all", help="图标家族，默认 all")
+    icons_parser.add_argument("--limit", type=int, default=30)
+    icons_parser.set_defaults(handler=command_icons)
 
     lint_parser = subparsers.add_parser("lint", help="检查 deck-spec.json")
     lint_parser.add_argument("--spec", required=True)
