@@ -28,7 +28,6 @@ PASS_TYPES = {
     "group",
     "notes",
 }
-DESIGN_ROLES = {"cover", "section", "thesis", "framework", "comparison", "process", "timeline", "data", "table", "case", "decision", "closing"}
 
 
 @dataclass
@@ -121,9 +120,9 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
 
     design = spec.get("design")
     if not isinstance(design, dict):
-        findings.append(Finding("warning", "design", "缺少全篇设计协议：style_id、grid、icon_family 和参考语法"))
+        findings.append(Finding("warning", "design", "缺少全篇设计协议：style_id、grid 和项目级构图规则"))
     else:
-        for key in ("style_id", "grid", "icon_family"):
+        for key in ("style_id", "grid"):
             if not design.get(key):
                 findings.append(Finding("warning", f"design.{key}", "缺少全篇设计决定"))
 
@@ -141,8 +140,6 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
             slide_names.add(slide_name)
         if not slide.get("role"):
             findings.append(Finding("warning", location, "缺少页面角色 role"))
-        elif slide.get("role") not in DESIGN_ROLES:
-            findings.append(Finding("warning", location, f"页面角色未在设计协议中定义：{slide.get('role')}"))
         if not slide.get("message"):
             findings.append(Finding("warning", location, "缺少单页结论 message"))
         for design_key in ("layout_id", "visual_job", "visual_anchor", "asset_plan"):

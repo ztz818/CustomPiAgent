@@ -10,10 +10,11 @@ Nova 只依赖一条执行路径：`deck-spec.json` → 构建器 → 原生 PPT
 ├── references/
 ├── schemas/
 ├── scripts/
-├── templates/
 ├── assets/
-└── examples/
+└── templates/
 ```
+
+技能不内置完整业务成稿模板。`templates/` 只提供可拆解的风格与几何起点，避免后续演示被某个示例内容或固定页序锚定。
 
 ## 执行步骤
 
