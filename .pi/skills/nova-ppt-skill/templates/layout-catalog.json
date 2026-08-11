@@ -1,0 +1,79 @@
+{
+  "canvas": {"width": "960pt", "height": "540pt", "safe_margin": "40pt", "grid": "8pt"},
+  "layouts": [
+    {
+      "id": "cover-visual-field",
+      "role": "cover",
+      "density": "low",
+      "regions": {
+        "title": {"x": "48pt", "y": "82pt", "width": "520pt", "height": "124pt"},
+        "subtitle": {"x": "48pt", "y": "222pt", "width": "470pt", "height": "64pt"},
+        "visual": {"x": "590pt", "y": "46pt", "width": "322pt", "height": "414pt"},
+        "meta": {"x": "48pt", "y": "462pt", "width": "500pt", "height": "28pt"}
+      }
+    },
+    {
+      "id": "title-three-cards",
+      "role": "framework",
+      "density": "medium",
+      "regions": {
+        "title": {"x": "40pt", "y": "44pt", "width": "880pt", "height": "42pt"},
+        "subtitle": {"x": "40pt", "y": "92pt", "width": "880pt", "height": "28pt"},
+        "card1": {"x": "40pt", "y": "148pt", "width": "280pt", "height": "300pt"},
+        "card2": {"x": "340pt", "y": "148pt", "width": "280pt", "height": "300pt"},
+        "card3": {"x": "640pt", "y": "148pt", "width": "280pt", "height": "300pt"}
+      }
+    },
+    {
+      "id": "asymmetric-comparison",
+      "role": "comparison",
+      "density": "medium",
+      "regions": {
+        "title": {"x": "40pt", "y": "44pt", "width": "880pt", "height": "42pt"},
+        "primary": {"x": "40pt", "y": "126pt", "width": "540pt", "height": "340pt"},
+        "secondary": {"x": "606pt", "y": "126pt", "width": "314pt", "height": "340pt"}
+      }
+    },
+    {
+      "id": "process-five",
+      "role": "process",
+      "density": "medium",
+      "regions": {
+        "title": {"x": "40pt", "y": "44pt", "width": "880pt", "height": "42pt"},
+        "process": {"x": "40pt", "y": "162pt", "width": "880pt", "height": "170pt"},
+        "evidence": {"x": "40pt", "y": "366pt", "width": "880pt", "height": "104pt"}
+      }
+    },
+    {
+      "id": "data-focus",
+      "role": "data",
+      "density": "medium",
+      "regions": {
+        "title": {"x": "40pt", "y": "44pt", "width": "880pt", "height": "42pt"},
+        "metric": {"x": "40pt", "y": "134pt", "width": "260pt", "height": "270pt"},
+        "chart": {"x": "326pt", "y": "126pt", "width": "594pt", "height": "326pt"}
+      }
+    },
+    {
+      "id": "native-table",
+      "role": "table",
+      "density": "high",
+      "regions": {
+        "title": {"x": "40pt", "y": "38pt", "width": "880pt", "height": "42pt"},
+        "table": {"x": "40pt", "y": "112pt", "width": "880pt", "height": "342pt"},
+        "note": {"x": "40pt", "y": "470pt", "width": "880pt", "height": "28pt"}
+      }
+    },
+    {
+      "id": "decision-close",
+      "role": "decision",
+      "density": "low",
+      "regions": {
+        "eyebrow": {"x": "48pt", "y": "54pt", "width": "300pt", "height": "24pt"},
+        "decision": {"x": "48pt", "y": "118pt", "width": "700pt", "height": "132pt"},
+        "actions": {"x": "48pt", "y": "302pt", "width": "864pt", "height": "116pt"},
+        "meta": {"x": "48pt", "y": "472pt", "width": "864pt", "height": "24pt"}
+      }
+    }
+  ]
+}
