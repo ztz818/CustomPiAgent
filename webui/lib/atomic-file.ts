@@ -1,11 +1,16 @@
 import { randomUUID } from "crypto";
-import { basename, dirname, join } from "path";
 import { renameSync, unlinkSync, writeFileSync } from "fs";
+import { basename, dirname, join } from "path";
 
-export function writePrivateFileAtomicSync(filePath: string, contents: string): void {
-  const dir = dirname(filePath);
-  const tempPath = join(dir, `.${basename(filePath)}-${randomUUID()}.tmp`);
-  let failed = false;
+/**
+ * Replace a file atomically without exposing credentials through default
+ * process permissions. The caller must create the parent directory first.
+ */
+export function writePrivateFileAtomicSync(path: string, contents: string): void {
+  const dir = dirname(path);
+  const tempPath = join(dir, `.${basename(path)}-${randomUUID()}.tmp`);
+  let operationFailed = false;
+
   try {
     writeFileSync(tempPath, contents, {
       encoding: "utf8",
@@ -13,15 +18,17 @@ export function writePrivateFileAtomicSync(filePath: string, contents: string): 
       mode: 0o600,
       flush: true,
     });
-    renameSync(tempPath, filePath);
+    renameSync(tempPath, path);
   } catch (error) {
-    failed = true;
+    operationFailed = true;
     throw error;
   } finally {
     try {
       unlinkSync(tempPath);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !failed) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !operationFailed) {
+        throw error;
+      }
     }
   }
 }

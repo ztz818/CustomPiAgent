@@ -34,6 +34,8 @@ export interface ImageContent {
 export interface ThinkingContent {
   type: "thinking";
   thinking: string;
+  /** Historical content omitted from the initial response and loaded on demand. */
+  deferred?: boolean;
 }
 
 export interface ToolCallContent {
@@ -80,6 +82,7 @@ export interface ToolResultMessage {
   toolName?: string;
   content: (TextContent | ImageContent)[];
   isError?: boolean;
+  details?: unknown;
   timestamp?: number;
 }
 
@@ -92,7 +95,114 @@ export interface CustomMessage {
   timestamp?: number;
 }
 
-export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomMessage;
+export interface BashExecutionMessage {
+  role: "bashExecution";
+  command: string;
+  output: string;
+  exitCode?: number;
+  cancelled?: boolean;
+  truncated?: boolean;
+  fullOutputPath?: string;
+  excludeFromContext?: boolean;
+  timestamp?: number;
+}
+
+export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomMessage | BashExecutionMessage;
+
+export type ExtensionUiRequest =
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "select";
+      title: string;
+      options: string[];
+      timeout?: number;
+      expiresAt?: number;
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "confirm";
+      title: string;
+      message: string;
+      timeout?: number;
+      expiresAt?: number;
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "input";
+      title: string;
+      placeholder?: string;
+      timeout?: number;
+      expiresAt?: number;
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "editor";
+      title: string;
+      prefill?: string;
+      timeout?: number;
+      expiresAt?: number;
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "notify";
+      message: string;
+      notifyType?: "info" | "warning" | "error";
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "setStatus";
+      statusKey: string;
+      statusText?: string;
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "setWidget";
+      widgetKey: string;
+      widgetLines?: string[];
+      widgetPlacement?: "aboveEditor" | "belowEditor";
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "setTitle";
+      title: string;
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "set_editor_text";
+      text: string;
+    }
+  | {
+      type: "extension_ui_request";
+      id: string;
+      method: "custom";
+      lines: string[];
+      closed?: boolean;
+    };
+
+export type ExtensionUiResponse =
+  | { type: "extension_ui_response"; id: string; value: string }
+  | { type: "extension_ui_response"; id: string; confirmed: boolean }
+  | { type: "extension_ui_response"; id: string; cancelled: true };
+
+export interface ExtensionStatusItem {
+  key: string;
+  text: string;
+}
+
+export interface ExtensionWidgetItem {
+  key: string;
+  lines: string[];
+  placement: "aboveEditor" | "belowEditor";
+}
 
 export interface SessionMessageEntry extends SessionEntryBase {
   type: "message";
@@ -169,6 +279,7 @@ export interface SessionTreeNode {
   entry: SessionEntry;
   children: SessionTreeNode[];
   label?: string;
+  compressedEntryIds?: string[];
 }
 
 export interface SessionInfo {
@@ -181,6 +292,12 @@ export interface SessionInfo {
   messageCount: number;
   firstMessage: string;
   parentSessionId?: string; // set if this session was forked from another
+  /** Main repo root shared by all worktrees of this cwd (cwd itself for non-git dirs).
+   *  Always set by the server; optional because the client builds transient
+   *  SessionInfo objects before the first refresh. Fall back to cwd. */
+  projectRoot?: string;
+  /** Branch name when cwd is a linked git worktree (not the main checkout) */
+  worktreeBranch?: string;
 }
 
 export interface SessionContext {
@@ -188,16 +305,4 @@ export interface SessionContext {
   entryIds: string[]; // parallel to messages — the session entry id for each message
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
-}
-
-// RPC types
-export interface RpcSessionState {
-  model?: { provider: string; id: string; contextWindow?: number };
-  thinkingLevel: string;
-  isStreaming: boolean;
-  isCompacting: boolean;
-  sessionFile?: string;
-  sessionId: string;
-  sessionName?: string;
-  messageCount: number;
 }

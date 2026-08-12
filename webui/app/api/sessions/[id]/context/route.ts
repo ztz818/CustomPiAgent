@@ -24,7 +24,10 @@ export async function GET(
     if (!findWorkspaceContainingPath(cwd, user.id)) {
       return NextResponse.json({ error: "Session is not authorized" }, { status: 403 });
     }
-    const context = buildSessionContext(sm.getEntries() as never, leafId);
+    const context = buildSessionContext(sm.getEntries() as never, leafId, {
+      deferThinking: true,
+      deferToolResultImages: true,
+    });
 
     return NextResponse.json({ context });
   } catch (error) {

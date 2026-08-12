@@ -15,9 +15,14 @@ function readModelsJson(): Record<string, unknown> {
   const path = getModelsPath();
   if (!existsSync(path)) return { providers: {} };
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  } catch {
-    return { providers: {} };
+    const data = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      throw new Error("root must be a JSON object");
+    }
+    return data as Record<string, unknown>;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid models.json: ${detail}`);
   }
 }
 

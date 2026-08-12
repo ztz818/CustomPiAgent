@@ -1,9 +1,18 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
-import type { FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { forwardRef, useState, useCallback, useEffect, useImperativeHandle, useMemo, useRef, type MouseEvent as ReactMouseEvent } from "react";
 import { getFileIcon, FolderIcon } from "./FileIcons";
-import { encodeFilePathForApi, getRelativeFilePath, joinFilePath } from "@/lib/file-paths";
+import {
+  encodeFilePathForApi,
+  getFileDirectory,
+  getFileName,
+  getRelativeFilePath,
+  joinFilePath,
+  normalizeFilePathSlashes,
+} from "@/lib/file-paths";
+import type { GitFileStatus, GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
+import { useI18n } from "@/hooks/useI18n";
+type Translate = ReturnType<typeof useI18n>["t"];
 
 interface FileEntry {
   name: string;
@@ -23,12 +32,47 @@ interface FileNode {
 
 interface Props {
   cwd: string;
-  onOpenFile: (filePath: string, fileName: string) => void;
+  onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   refreshKey?: number;
-  onAtMention?: (relativePath: string) => void;
+  onAtMention?: (relativePath: string, isDir: boolean) => void;
+  onAtMentions?: (relativePaths: string[]) => void;
+  onUploadBusyChange?: (busy: boolean) => void;
+  changesCollapsed: boolean;
+  onChangesCountChange?: (count: number) => void;
 }
 
-const AUTO_REFRESH_INTERVAL_MS = 1000;
+export interface FileExplorerHandle {
+  openUploadPicker: () => void;
+}
+
+type UploadPhase = "idle" | "checking" | "uploading";
+type UploadConflictStrategy = "error" | "overwrite" | "skip";
+
+interface UploadError {
+  name: string;
+  error: string;
+}
+
+interface UploadResponse {
+  uploaded?: string[];
+  skipped?: string[];
+  errors?: UploadError[];
+  conflicts?: string[];
+  nonReplaceable?: string[];
+  error?: string;
+}
+
+interface UploadSummary {
+  uploaded: string[];
+  skipped: string[];
+  errors: UploadError[];
+}
+
+interface PendingConflict {
+  files: File[];
+  conflicts: string[];
+  nonReplaceable: string[];
+}
 
 interface FileMenuState {
   x: number;
@@ -36,21 +80,30 @@ interface FileMenuState {
   node: FileNode;
 }
 
-interface PendingCreateState {
-  parentPath: string;
-  type: "mkdir" | "touch";
+async function runJsonAction(url: string, init: RequestInit) {
+  const response = await fetch(url, init);
+  const data = await response.json().catch(() => ({})) as { error?: string };
+  if (!response.ok) throw new Error(data.error ?? `Request failed (HTTP ${response.status})`);
+  return data;
 }
 
-interface DeleteState {
-  node: FileNode;
-  error?: string;
-  deleting?: boolean;
+function downloadPath(filePath: string, isDir: boolean) {
+  window.location.href = `/api/files/${encodeFilePathForApi(filePath)}?type=${isDir ? "download-zip" : "download"}`;
 }
 
 async function fetchEntries(dirPath: string): Promise<FileNode[]> {
   const encoded = encodeFilePathForApi(dirPath);
   const res = await fetch(`/api/files/${encoded}?type=list`);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    let message = `Failed to load files (HTTP ${res.status})`;
+    try {
+      const data = await res.json() as { error?: string };
+      if (data.error) message = data.error;
+    } catch {
+      // ignore non-JSON error bodies
+    }
+    throw new Error(message);
+  }
   const data = await res.json() as { entries?: FileEntry[] };
   return (data.entries ?? []).map((e) => ({
     name: e.name,
@@ -62,140 +115,114 @@ async function fetchEntries(dirPath: string): Promise<FileNode[]> {
   }));
 }
 
-async function runJsonAction(url: string, init: RequestInit) {
-  const res = await fetch(url, init);
-  const data = await res.json().catch(() => ({})) as { error?: string };
-  if (!res.ok) throw new Error(data.error ?? `Request failed: ${res.status}`);
-  return data;
+async function fetchGitStatus(cwd: string): Promise<GitStatusResponse> {
+  const params = new URLSearchParams({ cwd });
+  const res = await fetch(`/api/git/status?${params.toString()}`);
+  if (!res.ok) throw new Error(`Failed to load Git status (HTTP ${res.status})`);
+  return res.json() as Promise<GitStatusResponse>;
 }
 
-function downloadPath(filePath: string, isDir: boolean) {
-  const encoded = encodeFilePathForApi(filePath);
-  window.location.href = `/api/files/${encoded}?type=${isDir ? "download-zip" : "download"}`;
-}
+const GIT_STATUS_KEYS: Record<GitFileStatusKind, string> = {
+  modified: "files.modified",
+  added: "files.added",
+  deleted: "files.deleted",
+  renamed: "files.renamed",
+  untracked: "files.untracked",
+  conflict: "files.conflict",
+};
 
-function defaultCreateName(type: "mkdir" | "touch") {
-  return type === "mkdir" ? "untitled" : "untitled.md";
-}
+const GIT_STATUS_COLORS: Record<GitFileStatusKind, string> = {
+  modified: "#d6a84b",
+  added: "#4ade80",
+  deleted: "#f87171",
+  renamed: "#60a5fa",
+  untracked: "#4ade80",
+  conflict: "#f87171",
+};
 
-function getRenameSelection(name: string, isDir: boolean) {
-  if (isDir) return { start: 0, end: name.length };
-  const dot = name.lastIndexOf(".");
-  if (dot <= 0) return { start: 0, end: name.length };
-  return { start: 0, end: dot };
-}
-
-function InlineNameInput({
-  depth,
-  icon,
-  initialValue,
-  placeholder,
-  autoSelectNameOnly,
-  onCancel,
-  onSubmit,
-}: {
-  depth: number;
-  icon: ReactNode;
-  initialValue: string;
-  placeholder: string;
-  autoSelectNameOnly?: { isDir: boolean };
-  onCancel: () => void;
-  onSubmit: (name: string) => Promise<void>;
-}) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const [name, setName] = useState(initialValue);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    const input = inputRef.current;
-    if (!input) return;
-    input.focus();
-    if (autoSelectNameOnly) {
-      const selection = getRenameSelection(initialValue, autoSelectNameOnly.isDir);
-      input.setSelectionRange(selection.start, selection.end);
-    } else {
-      input.select();
-    }
-  }, [autoSelectNameOnly, initialValue]);
-
-  const submit = useCallback(async () => {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setError("Name is required");
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await onSubmit(trimmed);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setSaving(false);
-    }
-  }, [name, onSubmit]);
-
-  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      void submit();
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onCancel();
-    }
-  }, [onCancel, submit]);
-
-  const handleSubmit = useCallback((event: FormEvent) => {
-    event.preventDefault();
-    void submit();
-  }, [submit]);
-
+function GitStatusBadge({ status, t }: { status: GitFileStatus; t: Translate }) {
   return (
-    <form onSubmit={handleSubmit} style={{ paddingLeft: 8 + depth * 14, paddingRight: 8, margin: "1px 0 3px" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          height: 26,
-          borderRadius: 5,
-          background: "var(--bg-hover)",
-          border: `1px solid ${error ? "#ef4444" : "var(--accent)"}`,
-          padding: "0 6px",
-        }}
-      >
-        <span style={{ width: 10, flexShrink: 0 }} />
-        <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>{icon}</span>
-        <input
-          ref={inputRef}
-          value={name}
-          placeholder={placeholder}
-          disabled={saving}
-          onChange={(event) => {
-            setName(event.target.value);
-            if (error) setError(null);
-          }}
-          onKeyDown={handleKeyDown}
-          style={{
-            minWidth: 0,
-            flex: 1,
-            border: "none",
-            outline: "none",
-            background: "transparent",
-            color: "var(--text)",
-            fontSize: 12,
-            height: 22,
-          }}
-        />
-        {saving && <span style={{ fontSize: 11, color: "var(--text-dim)" }}>Saving</span>}
-      </div>
-      {error && (
-        <div style={{ paddingLeft: 28, paddingTop: 3, color: "#ef4444", fontSize: 11 }}>
-          {error}
-        </div>
-      )}
-    </form>
+    <span
+      title={t(GIT_STATUS_KEYS[status.status])}
+      aria-label={t(GIT_STATUS_KEYS[status.status])}
+      style={{
+        width: 14,
+        height: 14,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: GIT_STATUS_COLORS[status.status],
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        fontWeight: 600,
+      }}
+    >
+      {status.code}
+    </span>
+  );
+}
+
+function uploadFiles(
+  targetDirectory: string,
+  files: File[],
+  strategy: UploadConflictStrategy,
+  onProgress: (progress: number) => void,
+): Promise<{ status: number; data: UploadResponse }> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file, file.name));
+
+    const xhr = new XMLHttpRequest();
+    xhr.open(
+      "POST",
+      `/api/files/${encodeFilePathForApi(targetDirectory)}?type=upload&conflict=${strategy}`,
+    );
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error while uploading files"));
+    xhr.onabort = () => reject(new Error("Upload cancelled"));
+    xhr.onload = () => {
+      let data: UploadResponse = {};
+      try {
+        data = JSON.parse(xhr.responseText) as UploadResponse;
+      } catch {
+        if (xhr.responseText) data.error = xhr.responseText;
+      }
+      resolve({ status: xhr.status, data });
+    };
+    xhr.send(formData);
+  });
+}
+
+function MentionIcon({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
+    </svg>
+  );
+}
+
+function DismissButton({ onClick, title }: { onClick: () => void; title: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      style={{ width: 24, height: 24, padding: 0, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, border: "none", borderRadius: 4, background: "none", color: "var(--text-dim)", cursor: "pointer" }}
+      onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text-muted)"; event.currentTarget.style.background = "var(--bg-hover)"; }}
+      onMouseLeave={(event) => { event.currentTarget.style.color = "var(--text-dim)"; event.currentTarget.style.background = "none"; }}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+        <path d="m6 6 12 12" />
+        <path d="m18 6-12 12" />
+      </svg>
+    </button>
   );
 }
 
@@ -207,38 +234,42 @@ function TreeNode({
   onAtMention,
   expandedPaths,
   onToggleExpanded,
-  refreshKey,
+  refreshToken,
+  highlightedPaths,
+  gitStatusByPath,
+  changedDirectoryPaths,
   onContextMenu,
-  pendingCreate,
-  editingPath,
-  onCancelInline,
-  onSubmitCreate,
-  onSubmitRename,
+  t,
 }: {
   node: FileNode;
   depth: number;
   cwd: string;
-  onOpenFile: (filePath: string, fileName: string) => void;
-  onAtMention?: (relativePath: string) => void;
+  onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
+  onAtMention?: (relativePath: string, isDir: boolean) => void;
   expandedPaths: Set<string>;
   onToggleExpanded: (fullPath: string, open: boolean) => void;
-  refreshKey?: number | string;
-  onContextMenu: (event: MouseEvent, node: FileNode) => void;
-  pendingCreate: PendingCreateState | null;
-  editingPath: string | null;
-  onCancelInline: () => void;
-  onSubmitCreate: (parentPath: string, type: "mkdir" | "touch", name: string) => Promise<void>;
-  onSubmitRename: (node: FileNode, name: string) => Promise<void>;
+  refreshToken: string;
+  highlightedPaths: Set<string>;
+  gitStatusByPath: Map<string, GitFileStatus>;
+  changedDirectoryPaths: Set<string>;
+  onContextMenu: (event: ReactMouseEvent, node: FileNode) => void;
+  t: Translate;
 }) {
   const open = expandedPaths.has(node.fullPath);
+  const highlighted = highlightedPaths.has(node.fullPath);
+  const normalizedPath = normalizeFilePathSlashes(node.fullPath);
+  const gitStatus = gitStatusByPath.get(normalizedPath);
+  const containsGitChanges = node.isDir && (
+    gitStatus !== undefined || changedDirectoryPaths.has(normalizedPath)
+  );
   const [children, setChildren] = useState<FileNode[]>(node.children ?? []);
   const [loaded, setLoaded] = useState(node.loaded ?? false);
   const [loading, setLoading] = useState(false);
   const [hovered, setHovered] = useState(false);
 
-  const loadChildren = useCallback(async (force = false, showLoading = true) => {
+  const loadChildren = useCallback(async (force = false) => {
     if (loaded && !force) return;
-    if (showLoading) setLoading(true);
+    setLoading(true);
     try {
       const entries = await fetchEntries(node.fullPath);
       setChildren(entries);
@@ -250,22 +281,15 @@ function TreeNode({
     }
   }, [loaded, node.fullPath]);
 
-  // When refreshKey causes a re-render with the same node identity, reload open dirs
-  const prevLoadedRef = useRef(loaded);
-  useEffect(() => {
-    prevLoadedRef.current = loaded;
-  });
-
-  // Re-fetch children when refreshKey changes and the directory is already open/loaded
+  // Re-fetch children when the tree refreshes and the directory is open.
   useEffect(() => {
     if (open && loaded) {
-      loadChildren(true, false);
+      loadChildren(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  }, [refreshToken]);
 
   const handleClick = useCallback(() => {
-    if (editingPath === node.fullPath) return;
     if (node.isDir) {
       const next = !open;
       onToggleExpanded(node.fullPath, next);
@@ -273,127 +297,177 @@ function TreeNode({
     } else {
       onOpenFile(node.fullPath, node.name);
     }
-  }, [editingPath, node.isDir, node.fullPath, node.name, loaded, open, loadChildren, onOpenFile, onToggleExpanded]);
-
-  const showInlineCreate = node.isDir && open && pendingCreate?.parentPath === node.fullPath;
-  const isRenaming = editingPath === node.fullPath;
+  }, [node.isDir, node.fullPath, node.name, loaded, open, loadChildren, onOpenFile, onToggleExpanded]);
 
   return (
     <div>
-      {isRenaming ? (
-        <InlineNameInput
-          depth={depth}
-          icon={node.isDir ? <FolderIcon size={14} open={open} /> : getFileIcon(node.name, 14)}
-          initialValue={node.name}
-          placeholder="Name"
-          autoSelectNameOnly={{ isDir: node.isDir }}
-          onCancel={onCancelInline}
-          onSubmit={(name) => onSubmitRename(node, name)}
-        />
-      ) : (
-        <div
-          onClick={handleClick}
-          onContextMenu={(event) => onContextMenu(event, node)}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-          style={{
-            position: "relative",
-            display: "flex",
-            alignItems: "center",
-            gap: 4,
-            paddingLeft: 8 + depth * 14,
-            paddingRight: 8,
-            height: 24,
-            cursor: "pointer",
-            background: hovered ? "var(--bg-hover)" : "transparent",
-            borderRadius: 4,
-            userSelect: "none",
-          }}
-        >
-          {node.isDir && (
-            <svg
-              width="10" height="10" viewBox="0 0 10 10" fill="none"
-              stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
-              style={{ flexShrink: 0, transform: open ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}
-            >
-              <polyline points="3 2 7 5 3 8" />
-            </svg>
-          )}
-          {!node.isDir && <span style={{ width: 10, flexShrink: 0 }} />}
-          <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
-            {node.isDir ? <FolderIcon size={14} open={open} /> : getFileIcon(node.name, 14)}
-          </span>
-          <span
-            style={{
-              fontSize: 12,
-              color: "var(--text)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              flex: 1,
-            }}
-            title={node.fullPath}
+      <div
+        onClick={handleClick}
+        onContextMenu={(event) => onContextMenu(event, node)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          position: "relative",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          paddingLeft: 8 + depth * 14,
+          paddingRight: 8,
+          height: 24,
+          cursor: "pointer",
+          background: hovered ? "var(--bg-hover)" : "transparent",
+          borderRadius: 4,
+          userSelect: "none",
+        }}
+      >
+        {node.isDir && (
+          <svg
+            width="10" height="10" viewBox="0 0 10 10" fill="none"
+            stroke="var(--text-dim)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+            style={{ flexShrink: 0, transform: open ? "rotate(90deg)" : "none", transition: "transform 0.1s" }}
           >
-            {node.name}
+            <polyline points="3 2 7 5 3 8" />
+          </svg>
+        )}
+        {!node.isDir && <span style={{ width: 10, flexShrink: 0 }} />}
+        <span style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+          {node.isDir ? <FolderIcon size={14} open={open} /> : getFileIcon(node.name, 14)}
+        </span>
+        <span
+          style={{
+            fontSize: 12,
+            color: "var(--text)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+          }}
+          title={node.fullPath}
+        >
+          {node.name}
+        </span>
+        {highlighted && (
+          <span
+            title={t("files.newlyUploaded")}
+            aria-label={t("files.newlyUploaded")}
+            style={{ width: 14, height: 14, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#3b82f6" }} />
           </span>
-          {loading && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="2" strokeLinecap="round">
-              <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" />
+        )}
+        {!hovered && !node.isDir && gitStatus && (
+          <GitStatusBadge status={gitStatus} t={t} />
+        )}
+        {!hovered && containsGitChanges && (
+          <span
+            title={t("files.containsChangedFiles")}
+            aria-label={t("files.containsChangedFiles")}
+            style={{
+              width: 14,
+              height: 14,
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#d6a84b" }} />
+          </span>
+        )}
+        {loading && (
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" strokeWidth="2" strokeLinecap="round">
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4" />
+          </svg>
+        )}
+        {onAtMention && hovered && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onAtMention(getRelativeFilePath(node.fullPath, cwd), node.isDir);
+            }}
+            title={t("files.insertPath")}
+            style={{
+              position: "absolute",
+              right: !node.isDir ? 28 : 4,
+              top: "50%",
+              transform: "translateY(-50%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              padding: "0 8px",
+              height: 20,
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              color: "var(--accent)",
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+            }}
+          >
+            <MentionIcon />
+            {t("files.mention")}
+          </button>
+        )}
+        {hovered && !node.isDir && (
+          <a
+            href={`/api/files/${encodeFilePathForApi(node.fullPath)}?type=download`}
+            download
+            onClick={(e) => e.stopPropagation()}
+            title={t("files.download")}
+            style={{
+              position: "absolute",
+              right: 4,
+              top: "50%",
+              transform: "translateY(-50%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 4,
+              padding: "0 5px",
+              height: 20,
+              background: "var(--bg-panel)",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              fontSize: 11,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              textDecoration: "none",
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-          )}
-          {onAtMention && hovered && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onAtMention(getRelativeFilePath(node.fullPath, cwd));
-              }}
-              title="Insert path into chat"
-              style={{
-                position: "absolute",
-                right: 4,
-                top: "50%",
-                transform: "translateY(-50%)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 4,
-                padding: "0 8px",
-                height: 20,
-                background: "var(--bg-panel)",
-                border: "1px solid var(--border)",
-                borderRadius: 4,
-                color: "var(--accent)",
-                cursor: "pointer",
-                fontSize: 11,
-                fontWeight: 600,
-                whiteSpace: "nowrap",
-              }}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
-              </svg>
-              mention
-            </button>
-          )}
-        </div>
-      )}
+          </a>
+        )}
+      </div>
       {node.isDir && open && (
         <div>
-          {showInlineCreate && (
-            <InlineNameInput
-              depth={depth + 1}
-              icon={pendingCreate.type === "mkdir" ? <FolderIcon size={14} /> : getFileIcon(defaultCreateName(pendingCreate.type), 14)}
-              initialValue={defaultCreateName(pendingCreate.type)}
-              placeholder={pendingCreate.type === "mkdir" ? "Folder name" : "File name"}
-              onCancel={onCancelInline}
-              onSubmit={(name) => onSubmitCreate(node.fullPath, pendingCreate.type, name)}
-            />
-          )}
           {children.map((child) => (
-            <TreeNode key={child.fullPath} node={child} depth={depth + 1} cwd={cwd} onOpenFile={onOpenFile} onAtMention={onAtMention} expandedPaths={expandedPaths} onToggleExpanded={onToggleExpanded} refreshKey={refreshKey} onContextMenu={onContextMenu} pendingCreate={pendingCreate} editingPath={editingPath} onCancelInline={onCancelInline} onSubmitCreate={onSubmitCreate} onSubmitRename={onSubmitRename} />
+            <TreeNode
+              key={child.fullPath}
+              node={child}
+              depth={depth + 1}
+              cwd={cwd}
+              onOpenFile={onOpenFile}
+              onAtMention={onAtMention}
+              expandedPaths={expandedPaths}
+              onToggleExpanded={onToggleExpanded}
+              refreshToken={refreshToken}
+              highlightedPaths={highlightedPaths}
+              gitStatusByPath={gitStatusByPath}
+              changedDirectoryPaths={changedDirectoryPaths}
+              onContextMenu={onContextMenu}
+              t={t}
+            />
           ))}
-          {children.length === 0 && loaded && !showInlineCreate && (
+          {children.length === 0 && loaded && (
             <div style={{ paddingLeft: 8 + (depth + 1) * 14, fontSize: 11, color: "var(--text-dim)", height: 22, display: "flex", alignItems: "center" }}>
               empty
             </div>
@@ -404,19 +478,173 @@ function TreeNode({
   );
 }
 
-export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props) {
+type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "diff" };
+
+type OpenFileHandler = (filePath: string, fileName: string, options?: OpenFileOptions) => void;
+
+function ChangeRow({
+  status,
+  cwd,
+  onOpenFile,
+  t,
+}: {
+  status: GitFileStatus;
+  cwd: string;
+  onOpenFile: OpenFileHandler;
+  t: Translate;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const name = getFileName(status.filePath);
+  const rel = getRelativeFilePath(status.filePath, cwd);
+  return (
+    <div
+      onClick={() => onOpenFile(status.filePath, name, { modeHint: "diff" })}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      title={status.filePath}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        paddingLeft: 10,
+        paddingRight: 8,
+        height: 24,
+        cursor: "pointer",
+        background: hovered ? "var(--bg-hover)" : "transparent",
+        borderRadius: 4,
+        userSelect: "none",
+      }}
+    >
+      <GitStatusBadge status={status} t={t} />
+      <span style={{ flexShrink: 0, display: "flex", alignItems: "center", opacity: 0.85 }}>
+        {getFileIcon(name, 13)}
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          color: "var(--text)",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          flex: 1,
+        }}
+      >
+        {rel}
+      </span>
+    </div>
+  );
+}
+
+export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
+  cwd,
+  onOpenFile,
+  refreshKey,
+  onAtMention,
+  onAtMentions,
+  onUploadBusyChange,
+  changesCollapsed,
+  onChangesCountChange,
+}, ref) {
+  const { t } = useI18n();
   const [roots, setRoots] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
-  const [autoRefreshKey, setAutoRefreshKey] = useState(0);
-  const [menu, setMenu] = useState<FileMenuState | null>(null);
-  const [pendingCreate, setPendingCreate] = useState<PendingCreateState | null>(null);
-  const [editingPath, setEditingPath] = useState<string | null>(null);
-  const [deleteState, setDeleteState] = useState<DeleteState | null>(null);
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0);
+  const [highlightedPaths, setHighlightedPaths] = useState<Set<string>>(new Set());
+  const [gitFiles, setGitFiles] = useState<GitFileStatus[]>([]);
+  const [gitLineStats, setGitLineStats] = useState({ additions: 0, deletions: 0 });
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
+  const [pendingConflict, setPendingConflict] = useState<PendingConflict | null>(null);
   const prevCwdRef = useRef<string | null>(null);
-  const effectiveRefreshKey = `${refreshKey ?? 0}:${autoRefreshKey}`;
-  const bumpRefresh = useCallback(() => setAutoRefreshKey((key) => key + 1), []);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const [menu, setMenu] = useState<FileMenuState | null>(null);
+  const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
+  const uploadBusy = uploadPhase !== "idle";
+
+  const refreshTree = useCallback(() => setTreeRefreshKey((key) => key + 1), []);
+
+  const handleContextMenu = useCallback((event: ReactMouseEvent, node: FileNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({ x: event.clientX, y: event.clientY, node });
+  }, []);
+
+  const createEntry = useCallback(async (parentPath: string, type: "mkdir" | "touch") => {
+    setMenu(null);
+    const suggested = type === "mkdir" ? "untitled" : "untitled.md";
+    const name = window.prompt(type === "mkdir" ? "Folder name" : "File name", suggested)?.trim();
+    if (!name) return;
+    await runJsonAction(`/api/files/${encodeFilePathForApi(parentPath)}?type=${type}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    refreshTree();
+  }, [refreshTree]);
+
+  const renameEntry = useCallback(async (node: FileNode) => {
+    setMenu(null);
+    const name = window.prompt("Rename", node.name)?.trim();
+    if (!name || name === node.name) return;
+    await runJsonAction(`/api/files/${encodeFilePathForApi(node.fullPath)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    refreshTree();
+  }, [refreshTree]);
+
+  const deleteEntry = useCallback(async (node: FileNode) => {
+    setMenu(null);
+    if (!window.confirm(`Delete ${node.isDir ? "folder" : "file"} “${node.name}”?`)) return;
+    await runJsonAction(`/api/files/${encodeFilePathForApi(node.fullPath)}`, { method: "DELETE" });
+    refreshTree();
+  }, [refreshTree]);
+
+  const uploadInto = useCallback((directory: string) => {
+    setMenu(null);
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files ?? []);
+      if (files.length === 0) return;
+      const form = new FormData();
+      files.forEach((file) => form.append("files", file, file.name));
+      form.append("overwrite", "false");
+      try {
+        await runJsonAction(`/api/files/${encodeFilePathForApi(directory)}?type=upload`, { method: "POST", body: form });
+        refreshTree();
+      } catch (reason) {
+        window.alert(reason instanceof Error ? reason.message : String(reason));
+      }
+    };
+    input.click();
+  }, [refreshTree]);
+
+  const gitStatusByPath = useMemo(() => new Map(
+    gitFiles.map((status) => [normalizeFilePathSlashes(status.filePath), status]),
+  ), [gitFiles]);
+
+  const changedDirectoryPaths = useMemo(() => {
+    const directories = new Set<string>();
+    const normalizedCwd = normalizeFilePathSlashes(cwd).replace(/\/$/, "");
+    for (const status of gitFiles) {
+      let directory = getFileDirectory(normalizeFilePathSlashes(status.filePath));
+      while (directory === normalizedCwd || directory.startsWith(`${normalizedCwd}/`)) {
+        directories.add(directory);
+        if (directory === normalizedCwd) break;
+        const parent = getFileDirectory(directory);
+        if (parent === directory) break;
+        directory = parent;
+      }
+    }
+    return directories;
+  }, [cwd, gitFiles]);
 
   const handleToggleExpanded = useCallback((fullPath: string, open: boolean) => {
     setExpandedPaths((prev) => {
@@ -426,439 +654,437 @@ export function FileExplorer({ cwd, onOpenFile, refreshKey, onAtMention }: Props
     });
   }, []);
 
-  const startCreate = useCallback((parentPath: string, type: "mkdir" | "touch") => {
-    setMenu(null);
-    setEditingPath(null);
-    setPendingCreate({ parentPath, type });
-    if (parentPath !== cwd) handleToggleExpanded(parentPath, true);
-  }, [cwd, handleToggleExpanded]);
+  const applyUploadResult = useCallback((data: UploadResponse) => {
+    const uploaded = data.uploaded ?? [];
+    const skipped = data.skipped ?? [];
+    const errors = data.errors ?? [];
+    setUploadSummary({ uploaded, skipped, errors });
 
-  const cancelInline = useCallback(() => {
-    setPendingCreate(null);
-    setEditingPath(null);
-  }, []);
-
-  const submitCreate = useCallback(async (dirPath: string, type: "mkdir" | "touch", name: string) => {
-    const encoded = encodeFilePathForApi(dirPath);
-    const data = await runJsonAction(`/api/files/${encoded}?type=${type}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    }) as { path?: string };
-    const createdPath = data.path ?? joinFilePath(dirPath, name);
-    setPendingCreate(null);
-    if (type === "mkdir") {
-      handleToggleExpanded(createdPath, true);
-    } else {
-      onOpenFile(createdPath, name);
+    if (uploaded.length > 0) {
+      setHighlightedPaths(new Set(uploaded.map((name) => joinFilePath(cwd, name))));
+      setTreeRefreshKey((key) => key + 1);
     }
-    bumpRefresh();
-  }, [bumpRefresh, handleToggleExpanded, onOpenFile]);
+  }, [cwd]);
 
-  const submitRename = useCallback(async (node: FileNode, name: string) => {
-    if (name === node.name) {
-      setEditingPath(null);
-      return;
-    }
-    const encoded = encodeFilePathForApi(node.fullPath);
-    await runJsonAction(`/api/files/${encoded}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    setEditingPath(null);
-    bumpRefresh();
-  }, [bumpRefresh]);
+  const performUpload = useCallback(async (
+    files: File[],
+    strategy: UploadConflictStrategy,
+  ) => {
+    setPendingConflict(null);
+    setUploadError(null);
+    setUploadProgress(0);
+    setUploadPhase("uploading");
 
-  const uploadInto = useCallback((dirPath: string) => {
-    setMenu(null);
-    const input = document.createElement("input");
-    input.type = "file";
-    input.multiple = true;
-    input.onchange = async () => {
-      const files = Array.from(input.files ?? []);
-      if (files.length === 0) return;
-      const form = new FormData();
-      for (const file of files) form.append("files", file);
-      form.append("overwrite", "false");
-      try {
-        const encoded = encodeFilePathForApi(dirPath);
-        await runJsonAction(`/api/files/${encoded}?type=upload`, { method: "POST", body: form });
-        bumpRefresh();
-      } catch (e) {
-        window.alert(String(e));
-      }
-    };
-    input.click();
-  }, [bumpRefresh]);
-
-  const startRename = useCallback((node: FileNode) => {
-    setMenu(null);
-    setPendingCreate(null);
-    setEditingPath(node.fullPath);
-  }, []);
-
-  const confirmDelete = useCallback(async () => {
-    if (!deleteState) return;
-    setDeleteState({ ...deleteState, deleting: true, error: undefined });
     try {
-      const encoded = encodeFilePathForApi(deleteState.node.fullPath);
-      await runJsonAction(`/api/files/${encoded}`, { method: "DELETE" });
-      setDeleteState(null);
-      bumpRefresh();
-    } catch (e) {
-      setDeleteState({
-        ...deleteState,
-        deleting: false,
-        error: e instanceof Error ? e.message : String(e),
-      });
+      const { status, data } = await uploadFiles(cwd, files, strategy, setUploadProgress);
+      if (status === 409 && data.conflicts?.length) {
+        setPendingConflict({
+          files,
+          conflicts: data.conflicts,
+          nonReplaceable: data.nonReplaceable ?? [],
+        });
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        throw new Error(data.error ?? `Upload failed (HTTP ${status})`);
+      }
+      setUploadProgress(100);
+      applyUploadResult(data);
+    } catch (uploadFailure) {
+      setUploadError(uploadFailure instanceof Error ? uploadFailure.message : String(uploadFailure));
+    } finally {
+      setUploadPhase("idle");
     }
-  }, [bumpRefresh, deleteState]);
+  }, [applyUploadResult, cwd]);
 
-  const handleContextMenu = useCallback((event: MouseEvent, node: FileNode) => {
-    event.preventDefault();
-    setMenu({ x: event.clientX, y: event.clientY, node });
-  }, []);
+  const prepareUpload = useCallback(async (files: File[]) => {
+    if (files.length === 0 || uploadBusy) return;
+    setUploadSummary(null);
+    setHighlightedPaths(new Set());
+    setPendingConflict(null);
+    setUploadError(null);
+    setUploadProgress(0);
+    setUploadPhase("checking");
+
+    try {
+      const res = await fetch(
+        `/api/files/${encodeFilePathForApi(cwd)}?type=upload-check`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileNames: files.map((file) => file.name) }),
+        },
+      );
+      const data = await res.json().catch(() => ({})) as UploadResponse;
+      if (!res.ok) throw new Error(data.error ?? `Upload check failed (HTTP ${res.status})`);
+
+      if (data.conflicts?.length) {
+        setPendingConflict({
+          files,
+          conflicts: data.conflicts,
+          nonReplaceable: data.nonReplaceable ?? [],
+        });
+        return;
+      }
+
+      await performUpload(files, "error");
+    } catch (uploadFailure) {
+      setUploadError(uploadFailure instanceof Error ? uploadFailure.message : String(uploadFailure));
+    } finally {
+      setUploadPhase("idle");
+    }
+  }, [cwd, performUpload, uploadBusy]);
+
+  const handleUploadInput = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    void prepareUpload(files);
+  }, [prepareUpload]);
+
+  useImperativeHandle(ref, () => ({
+    openUploadPicker() {
+      if (!uploadBusy) uploadInputRef.current?.click();
+    },
+  }), [uploadBusy]);
 
   useEffect(() => {
+    onUploadBusyChange?.(uploadBusy);
+  }, [onUploadBusyChange, uploadBusy]);
+
+  useEffect(() => () => onUploadBusyChange?.(false), [onUploadBusyChange]);
+
+  useEffect(() => {
+    if (!menu) return;
     const close = () => setMenu(null);
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setMenu(null);
-    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
     window.addEventListener("click", close);
+    window.addEventListener("blur", close);
     window.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("scroll", close, true);
     return () => {
       window.removeEventListener("click", close);
+      window.removeEventListener("blur", close);
       window.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("scroll", close, true);
     };
-  }, []);
+  }, [menu]);
 
   useEffect(() => {
     const cwdChanged = prevCwdRef.current !== cwd;
     prevCwdRef.current = cwd;
 
     // Reset expanded state only when cwd changes, not on refreshKey bumps
-    if (cwdChanged) setExpandedPaths(new Set());
+    if (cwdChanged) {
+      setExpandedPaths(new Set());
+      setHighlightedPaths(new Set());
+      setUploadSummary(null);
+      setPendingConflict(null);
+      setUploadError(null);
+    }
 
     setLoading(cwdChanged);
     setError(null);
+    let cancelled = false;
     fetchEntries(cwd)
-      .then((entries) => setRoots(entries))
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, [cwd, effectiveRefreshKey]);
+      .then((entries) => { if (!cancelled) setRoots(entries); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [cwd, refreshKey, treeRefreshKey]);
 
+  // Keep the workspace tree current while files are changed by the agent or
+  // another terminal. The explicit refreshKey remains available for callers.
   useEffect(() => {
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-
-    const syncPolling = () => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const sync = () => {
       if (document.hidden) {
-        if (intervalId) {
-          clearInterval(intervalId);
-          intervalId = null;
-        }
+        if (interval) { clearInterval(interval); interval = null; }
         return;
       }
-      if (!intervalId) {
-        intervalId = setInterval(() => {
-          setAutoRefreshKey((key) => key + 1);
-        }, AUTO_REFRESH_INTERVAL_MS);
-      }
+      if (!interval) interval = setInterval(() => setTreeRefreshKey((key) => key + 1), 1000);
     };
-
-    syncPolling();
-    document.addEventListener("visibilitychange", syncPolling);
-
+    sync();
+    document.addEventListener("visibilitychange", sync);
     return () => {
-      document.removeEventListener("visibilitychange", syncPolling);
-      if (intervalId) clearInterval(intervalId);
+      if (interval) clearInterval(interval);
+      document.removeEventListener("visibilitychange", sync);
     };
   }, []);
 
-  if (loading) {
-    return (
-      <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
-        Loading files...
-      </div>
-    );
-  }
+  useEffect(() => {
+    let cancelled = false;
+    fetchGitStatus(cwd)
+      .then((status) => {
+        if (!cancelled) {
+          setGitFiles(status.isGitRepository ? status.files : []);
+          setGitLineStats(status.isGitRepository
+            ? { additions: status.additions, deletions: status.deletions }
+            : { additions: 0, deletions: 0 });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGitFiles([]);
+          setGitLineStats({ additions: 0, deletions: 0 });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [cwd, refreshKey]);
 
-  if (error) {
-    return (
-      <div style={{ padding: "8px 12px", fontSize: 11, color: "#f87171" }}>
-        {error}
-      </div>
+  useEffect(() => {
+    onChangesCountChange?.(gitFiles.length);
+  }, [gitFiles, onChangesCountChange]);
+
+  const showUploadFeedback = uploadBusy || pendingConflict !== null || uploadError !== null || uploadSummary !== null;
+
+  const addUploadedFilesToChat = useCallback(() => {
+    if (!uploadSummary || uploadSummary.uploaded.length === 0) return;
+    onAtMentions?.(
+      uploadSummary.uploaded.map((name) => getRelativeFilePath(joinFilePath(cwd, name), cwd)),
     );
-  }
+  }, [cwd, onAtMentions, uploadSummary]);
 
   return (
-    <div style={{ padding: "2px 4px", position: "relative" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 4px 6px" }}>
-        <ToolbarButton onClick={() => startCreate(cwd, "touch")} title="New file">
-          <FilePlusIcon />
-        </ToolbarButton>
-        <ToolbarButton onClick={() => startCreate(cwd, "mkdir")} title="New folder">
-          <FolderPlusIcon />
-        </ToolbarButton>
-        <ToolbarButton onClick={() => uploadInto(cwd)} title="Upload files">
-          <UploadIcon />
-        </ToolbarButton>
-        <ToolbarButton onClick={bumpRefresh} title="Refresh">
-          <RefreshIcon />
-        </ToolbarButton>
-      </div>
-      {pendingCreate?.parentPath === cwd && (
-        <InlineNameInput
-          depth={0}
-          icon={pendingCreate.type === "mkdir" ? <FolderIcon size={14} /> : getFileIcon(defaultCreateName(pendingCreate.type), 14)}
-          initialValue={defaultCreateName(pendingCreate.type)}
-          placeholder={pendingCreate.type === "mkdir" ? "Folder name" : "File name"}
-          onCancel={cancelInline}
-          onSubmit={(name) => submitCreate(cwd, pendingCreate.type, name)}
-        />
-      )}
-      {roots.map((node) => (
-        <TreeNode
-          key={node.fullPath}
-          node={node}
-          depth={0}
-          cwd={cwd}
-          onOpenFile={onOpenFile}
-          onAtMention={onAtMention}
-          expandedPaths={expandedPaths}
-          onToggleExpanded={handleToggleExpanded}
-          refreshKey={effectiveRefreshKey}
-          onContextMenu={handleContextMenu}
-          pendingCreate={pendingCreate}
-          editingPath={editingPath}
-          onCancelInline={cancelInline}
-          onSubmitCreate={submitCreate}
-          onSubmitRename={submitRename}
-        />
-      ))}
-      {roots.length === 0 && (
-        <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
-          No files found
+    <div
+      style={{ minHeight: "100%" }}
+      onContextMenu={(event) => {
+        if (event.target !== event.currentTarget) return;
+        handleContextMenu(event, { name: getFileName(cwd) || cwd, fullPath: cwd, isDir: true, size: 0 });
+      }}
+    >
+      <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
+      {showUploadFeedback && (
+        <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
+        {uploadBusy && (
+          <div role="status" aria-live="polite" aria-label={uploadPhase === "checking" ? t("files.checking") : t("files.uploading", { progress: uploadProgress })}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, minHeight: 14, color: "var(--text-muted)" }}>
+              {uploadPhase === "checking" ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" style={{ animation: "spin 0.8s linear infinite" }} aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-5.7-8.4" />
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 16V4" />
+                  <path d="m7 9 5-5 5 5" />
+                  <path d="M5 20h14" />
+                </svg>
+              )}
+              {uploadPhase === "uploading" && <span style={{ fontSize: 10 }}>{uploadProgress}%</span>}
+            </div>
+            {uploadPhase === "uploading" && (
+              <div style={{ height: 3, marginTop: 4, overflow: "hidden", borderRadius: 2, background: "var(--border)" }}>
+                <div style={{ width: `${uploadProgress}%`, height: "100%", background: "var(--text-muted)", transition: "width 120ms ease" }} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {pendingConflict && (
+          <div role="alert" style={{ padding: 7, border: "1px solid color-mix(in srgb, #f59e0b 55%, var(--border))", borderRadius: 4, background: "color-mix(in srgb, #f59e0b 9%, var(--bg-panel))" }}>
+            <div style={{ fontSize: 11, color: "var(--text)", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+              {t("files.conflictSummary", { count: pendingConflict.conflicts.length, countSuffix: pendingConflict.conflicts.length === 1 ? "" : "s", files: pendingConflict.conflicts.join(", ") })}
+            </div>
+            {pendingConflict.nonReplaceable.length > 0 && (
+              <div style={{ marginTop: 3, fontSize: 10, color: "#f59e0b", lineHeight: 1.35, overflowWrap: "anywhere" }}>
+                {t("files.cannotReplace", { files: pendingConflict.nonReplaceable.join(", ") })}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
+              <button type="button" onClick={() => void performUpload(pendingConflict.files, "overwrite")} style={{ height: 22, padding: "0 7px", border: "1px solid #ef4444", borderRadius: 4, background: "transparent", color: "#ef4444", cursor: "pointer", fontSize: 10 }}>
+                {t("files.replace")}
+              </button>
+              <button type="button" onClick={() => void performUpload(pendingConflict.files, "skip")} style={{ height: 22, padding: "0 7px", border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--text)", cursor: "pointer", fontSize: 10 }}>
+                {t("files.skipExisting")}
+              </button>
+              <button type="button" onClick={() => setPendingConflict(null)} style={{ height: 22, padding: "0 7px", border: "none", borderRadius: 4, background: "transparent", color: "var(--text-muted)", cursor: "pointer", fontSize: 10 }}>
+                {t("files.cancel")}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {uploadError && (
+          <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 11, lineHeight: 1.35, color: "#f87171" }}>
+            <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{uploadError}</span>
+            <DismissButton onClick={() => setUploadError(null)} title={t("files.dismissError")} />
+          </div>
+        )}
+
+        {uploadSummary && (
+          <div aria-live="polite">
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 22, fontSize: 11 }}>
+              <div style={{ minWidth: 0, flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+                {uploadSummary.uploaded.length > 0 && (
+                  <span title={`${uploadSummary.uploaded.length} uploaded`} aria-label={`${uploadSummary.uploaded.length} uploaded`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#22c55e" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m5 12 4 4L19 6" />
+                    </svg>
+                    <span>{uploadSummary.uploaded.length}</span>
+                  </span>
+                )}
+                {uploadSummary.skipped.length > 0 && (
+                  <span title={`${uploadSummary.skipped.length} skipped`} aria-label={`${uploadSummary.skipped.length} skipped`} style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--text-dim)" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M8 12h8" />
+                    </svg>
+                    <span>{uploadSummary.skipped.length}</span>
+                  </span>
+                )}
+                {uploadSummary.errors.length > 0 && (
+                  <span title={`${uploadSummary.errors.length} failed`} aria-label={`${uploadSummary.errors.length} failed`} style={{ display: "flex", alignItems: "center", gap: 3, color: "#f87171" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 3 2.5 20h19L12 3Z" />
+                      <path d="M12 9v4" />
+                      <path d="M12 17h.01" />
+                    </svg>
+                    <span>{uploadSummary.errors.length}</span>
+                  </span>
+                )}
+              </div>
+              {uploadSummary.uploaded.length > 0 && onAtMentions && (
+                <button
+                  type="button"
+                  onClick={addUploadedFilesToChat}
+                  title={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
+                  aria-label={uploadSummary.uploaded.length === 1 ? t("files.addUploadedFile") : t("files.addAllUploadedFiles")}
+                  style={{ height: 22, padding: "0 7px", display: "flex", alignItems: "center", justifyContent: "center", gap: 4, flexShrink: 0, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg-panel)", color: "var(--accent)", cursor: "pointer", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                >
+                  <MentionIcon />
+                  {t("files.mention")}
+                </button>
+              )}
+              <DismissButton onClick={() => setUploadSummary(null)} title={t("files.dismissUploadResults")} />
+            </div>
+            {uploadSummary.errors.map((item) => (
+              <div key={item.name} title={item.error} style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, minWidth: 0, fontSize: 10, color: "#f87171" }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 8v5" />
+                  <path d="M12 17h.01" />
+                </svg>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
         </div>
       )}
+
+      {!changesCollapsed && gitFiles.length > 0 && (
+        <div style={{ padding: "0 4px 2px" }}>
+          <div
+            aria-label={t("files.changeStats", {
+              count: gitFiles.length,
+              additions: gitLineStats.additions,
+              deletions: gitLineStats.deletions,
+            })}
+            style={{ display: "flex", alignItems: "center", gap: 6, height: 24, padding: "0 10px", fontSize: 12 }}
+          >
+            <span style={{ color: "var(--text-dim)" }}>
+              {t("files.changedCount", { count: gitFiles.length })}
+            </span>
+            <span style={{ color: GIT_STATUS_COLORS.added, fontFamily: "var(--font-mono)" }}>+{gitLineStats.additions}</span>
+            <span style={{ color: GIT_STATUS_COLORS.deleted, fontFamily: "var(--font-mono)" }}>-{gitLineStats.deletions}</span>
+          </div>
+          {gitFiles.map((status) => (
+            <ChangeRow key={status.filePath} status={status} cwd={cwd} onOpenFile={onOpenFile} t={t} />
+          ))}
+        </div>
+      )}
+
+      {(changesCollapsed || gitFiles.length === 0) && (
+        <div style={{ padding: "2px 4px" }}>
+          {loading ? (
+            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>Loading files...</div>
+          ) : error ? (
+            <div style={{ padding: "8px 12px", fontSize: 11, color: "#f87171" }}>{error}</div>
+          ) : (
+            roots.map((node) => (
+              <TreeNode
+                key={node.fullPath}
+                node={node}
+                depth={0}
+                cwd={cwd}
+                onOpenFile={onOpenFile}
+                onAtMention={onAtMention}
+                expandedPaths={expandedPaths}
+                onToggleExpanded={handleToggleExpanded}
+                refreshToken={refreshToken}
+                highlightedPaths={highlightedPaths}
+                gitStatusByPath={gitStatusByPath}
+                changedDirectoryPaths={changedDirectoryPaths}
+                onContextMenu={handleContextMenu}
+                t={t}
+              />
+            ))
+          )}
+          {!loading && !error && roots.length === 0 && (
+            <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
+              {t("files.noFiles")}
+            </div>
+          )}
+        </div>
+      )}
+
       {menu && (
         <div
+          role="menu"
+          aria-label={`${menu.node.name} actions`}
           onClick={(event) => event.stopPropagation()}
           style={{
             position: "fixed",
-            left: menu.x,
-            top: menu.y,
+            left: Math.min(menu.x, window.innerWidth - 196),
+            top: Math.min(menu.y, window.innerHeight - 300),
             zIndex: 1000,
-            minWidth: 170,
-            padding: 4,
-            background: "var(--bg-panel)",
+            width: 188,
+            padding: 5,
             border: "1px solid var(--border)",
-            borderRadius: 8,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+            borderRadius: 7,
+            background: "var(--bg-panel)",
+            boxShadow: "0 10px 28px rgba(0,0,0,0.18)",
           }}
         >
           {menu.node.isDir && (
             <>
-              <MenuButton onClick={() => startCreate(menu.node.fullPath, "touch")}>New File</MenuButton>
-              <MenuButton onClick={() => startCreate(menu.node.fullPath, "mkdir")}>New Folder</MenuButton>
-              <MenuButton onClick={() => uploadInto(menu.node.fullPath)}>Upload Here</MenuButton>
-              <MenuDivider />
+              <FileMenuButton label="New file" onClick={() => void createEntry(menu.node.fullPath, "touch").catch((error) => window.alert(String(error)))} />
+              <FileMenuButton label="New folder" onClick={() => void createEntry(menu.node.fullPath, "mkdir").catch((error) => window.alert(String(error)))} />
+              <FileMenuButton label="Upload here" onClick={() => uploadInto(menu.node.fullPath)} />
+              <div style={{ height: 1, margin: "4px 3px", background: "var(--border)" }} />
             </>
           )}
-          <MenuButton onClick={() => startRename(menu.node)}>Rename</MenuButton>
-          <MenuButton onClick={() => { navigator.clipboard?.writeText(getRelativeFilePath(menu.node.fullPath, cwd)); setMenu(null); }}>Copy Path</MenuButton>
-          <MenuButton onClick={() => { downloadPath(menu.node.fullPath, menu.node.isDir); setMenu(null); }}>Download</MenuButton>
-          <MenuDivider />
-          <MenuButton tone="danger" onClick={() => { setDeleteState({ node: menu.node }); setMenu(null); }}>Delete</MenuButton>
+          <FileMenuButton label="Rename" onClick={() => void renameEntry(menu.node).catch((error) => window.alert(String(error)))} />
+          <FileMenuButton label={menu.node.isDir ? "Download as ZIP" : "Download"} onClick={() => { setMenu(null); downloadPath(menu.node.fullPath, menu.node.isDir); }} />
+          <div style={{ height: 1, margin: "4px 3px", background: "var(--border)" }} />
+          <FileMenuButton danger label="Delete" onClick={() => void deleteEntry(menu.node).catch((error) => window.alert(String(error)))} />
         </div>
-      )}
-      {deleteState && (
-        <DeleteConfirmDialog
-          state={deleteState}
-          onCancel={() => setDeleteState(null)}
-          onConfirm={confirmDelete}
-        />
       )}
     </div>
   );
-}
+});
 
-function ToolbarButton({ children, onClick, title }: { children: ReactNode; onClick: () => void; title: string }) {
+function FileMenuButton({ label, onClick, danger = false }: { label: string; onClick: () => void; danger?: boolean }) {
   return (
     <button
       type="button"
-      onClick={onClick}
-      title={title}
-      aria-label={title}
-      style={{
-        width: 26,
-        height: 24,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "transparent",
-        border: "1px solid transparent",
-        borderRadius: 6,
-        color: "var(--text-muted)",
-        cursor: "pointer",
-        padding: 0,
-      }}
-      onMouseEnter={(event) => {
-        event.currentTarget.style.background = "var(--bg-hover)";
-        event.currentTarget.style.color = "var(--text)";
-        event.currentTarget.style.borderColor = "var(--border)";
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.background = "transparent";
-        event.currentTarget.style.color = "var(--text-muted)";
-        event.currentTarget.style.borderColor = "transparent";
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-function MenuButton({ children, onClick, tone = "default" }: { children: ReactNode; onClick: () => void; tone?: "default" | "danger" }) {
-  return (
-    <button
+      role="menuitem"
       onClick={onClick}
       style={{
         width: "100%",
-        background: "transparent",
+        height: 30,
+        padding: "0 9px",
         border: "none",
         borderRadius: 5,
-        color: tone === "danger" ? "#ef4444" : "var(--text)",
+        background: "transparent",
+        color: danger ? "#ef4444" : "var(--text)",
         cursor: "pointer",
-        fontSize: 12,
-        padding: "7px 9px",
         textAlign: "left",
+        fontSize: 12,
       }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
     >
-      {children}
+      {label}
     </button>
-  );
-}
-
-function MenuDivider() {
-  return <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />;
-}
-
-function DeleteConfirmDialog({
-  state,
-  onCancel,
-  onConfirm,
-}: {
-  state: DeleteState;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Delete ${state.node.name}`}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 1100,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "rgba(0,0,0,0.25)",
-      }}
-      onClick={onCancel}
-    >
-      <div
-        onClick={(event) => event.stopPropagation()}
-        style={{
-          width: "min(360px, calc(100vw - 32px))",
-          background: "var(--bg-panel)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          boxShadow: "0 18px 50px rgba(0,0,0,0.25)",
-          padding: 14,
-        }}
-      >
-        <div style={{ color: "var(--text)", fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
-          Delete {state.node.isDir ? "folder" : "file"}?
-        </div>
-        <div style={{ color: "var(--text-muted)", fontSize: 12, lineHeight: 1.5, marginBottom: 12 }}>
-          <span style={{ color: "var(--text)", fontWeight: 600 }}>{state.node.name}</span> will be permanently removed.
-        </div>
-        {state.error && (
-          <div style={{ color: "#ef4444", fontSize: 11, marginBottom: 12 }}>
-            {state.error}
-          </div>
-        )}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={onCancel} disabled={state.deleting} style={dialogButtonStyle}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={state.deleting}
-            style={{ ...dialogButtonStyle, background: "#ef4444", borderColor: "#ef4444", color: "white" }}
-          >
-            {state.deleting ? "Deleting" : "Delete"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const dialogButtonStyle = {
-  height: 28,
-  padding: "0 10px",
-  borderRadius: 6,
-  border: "1px solid var(--border)",
-  background: "var(--bg-panel)",
-  color: "var(--text)",
-  cursor: "pointer",
-  fontSize: 12,
-  fontWeight: 600,
-};
-
-function FilePlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6" />
-      <path d="M12 11v6" />
-      <path d="M9 14h6" />
-    </svg>
-  );
-}
-
-function FolderPlusIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 10v6" />
-      <path d="M9 13h6" />
-      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z" />
-    </svg>
-  );
-}
-
-function UploadIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <path d="M17 8l-5-5-5 5" />
-      <path d="M12 3v12" />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12a9 9 0 0 1-15.3 6.4L3 16" />
-      <path d="M3 21v-5h5" />
-      <path d="M3 12A9 9 0 0 1 18.3 5.6L21 8" />
-      <path d="M21 3v5h-5" />
-    </svg>
   );
 }

@@ -1,20 +1,17 @@
 import { NextResponse } from "next/server";
 import { requireCurrentUser, unauthorizedResponse } from "@/lib/auth-lite";
 import { resolveSessionPath } from "@/lib/session-reader";
-import { startRpcSession, getRpcSession, getRpcSessionOwner } from "@/lib/rpc-manager";
+import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { findWorkspaceContainingPath } from "@/lib/workspace-config";
 
 async function getAuthorizedSessionCwd(id: string, userId: string): Promise<{ cwd: string; filePath: string | null } | { error: NextResponse }> {
-  const owner = getRpcSessionOwner(id);
-  if (owner) {
-    if (owner.userId && owner.userId !== userId) {
+  const existing = getRpcSession(id);
+  if (existing?.isAlive()) {
+    if (!findWorkspaceContainingPath(existing.cwd, userId)) {
       return { error: NextResponse.json({ error: "Session is not authorized" }, { status: 403 }) };
     }
-    if (!findWorkspaceContainingPath(owner.cwd, userId)) {
-      return { error: NextResponse.json({ error: "Session is not authorized" }, { status: 403 }) };
-    }
-    return { cwd: owner.cwd, filePath: await resolveSessionPath(id) };
+    return { cwd: existing.cwd, filePath: await resolveSessionPath(id) };
   }
 
   const filePath = await resolveSessionPath(id);
@@ -49,7 +46,7 @@ export async function POST(
       return NextResponse.json({ success: true, data: result });
     }
 
-    const { session } = await startRpcSession(id, filePath ?? "", cwd, undefined, user.id);
+    const { session } = await startRpcSession(id, filePath ?? "", cwd, {});
     const result = await session.send(body);
 
     return NextResponse.json({ success: true, data: result });

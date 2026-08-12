@@ -33,7 +33,10 @@ export async function GET(
     const entries = sm.getEntries() as never;
     const tree = sm.getTree();
     const leafId = sm.getLeafId();
-    const context = buildSessionContext(entries, leafId);
+    const context = buildSessionContext(entries, leafId, {
+      deferThinking: true,
+      deferToolResultImages: true,
+    });
 
     let modified = header?.timestamp ?? new Date().toISOString();
     try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }

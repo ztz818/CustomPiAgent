@@ -54,8 +54,8 @@ function LoginForm() {
         boxShadow: "var(--shadow-popover)",
       }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 650 }}>Nova Agent</h1>
-          <p style={{ margin: "6px 0 0", color: "var(--text-muted)", fontSize: 13 }}>Sign in to your workspace</p>
+          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 650 }}>Nova Lab</h1>
+          <p style={{ margin: "6px 0 0", color: "var(--text-muted)", fontSize: 13 }}>进入你的智能工作空间</p>
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: 12, color: "var(--text-muted)" }}>
           Username

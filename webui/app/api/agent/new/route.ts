@@ -25,12 +25,17 @@ export async function POST(req: Request) {
     const { provider, modelId, toolNames, thinkingLevel, createOnly, ...promptCommand } = command as { provider?: string; modelId?: string; toolNames?: string[]; thinkingLevel?: string; createOnly?: boolean; [key: string]: unknown };
 
     const tempKey = `__new__${Date.now()}`;
-    const { session, realSessionId } = await startRpcSession(tempKey, "", workspace.rootPath, toolNames, user.id);
+    const { session, realSessionId } = await startRpcSession(tempKey, "", workspace.rootPath, {
+      ...(toolNames ? { toolNames } : {}),
+      ...(provider && modelId ? { initialModel: { provider, modelId } } : {}),
+      ...(thinkingLevel ? { thinkingLevel: thinkingLevel as never } : {}),
+    });
 
     // Keep the files-route allowed-roots cache (see app/api/files/[...path]/route.ts)
     // in sync so the new cwd is immediately readable via /api/files. Without this,
     // a file request under a brand-new cwd would 403 for up to the cache TTL.
-    globalThis.__piAllowedRootsCache?.get(user.id)?.roots.add(workspace.rootPath);
+    // File access derives roots from authorized workspaces; the workspace is
+    // already authorized and scaffolded above.
 
     // Apply pre-selected model before sending the prompt
     if (provider && modelId) {
