@@ -572,8 +572,35 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, []);
 
   const restoredRef = useRef(false);
+  const defaultCwdRequestedRef = useRef(false);
+
+  // Users with no history still need a workspace for the file explorer and
+  // the first new session. Resolve the server-side default for that case.
+  useEffect(() => {
+    if (
+      selectedCwd !== null ||
+      selectedCwdProp ||
+      skipInitialProjectSelection ||
+      initialSessionId ||
+      allSessions.length > 0 ||
+      defaultCwdRequestedRef.current
+    ) return;
+
+    defaultCwdRequestedRef.current = true;
+    let cancelled = false;
+    void fetch("/api/default-cwd", { method: "POST" })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({})) as { cwd?: string };
+        if (!cancelled && res.ok && data.cwd) setSelectedCwd(data.cwd);
+      })
+      .catch(() => {
+        // Keep the empty state if the default workspace cannot be resolved.
+      });
+    return () => { cancelled = true; };
+  }, [allSessions.length, initialSessionId, selectedCwd, selectedCwdProp, skipInitialProjectSelection]);
 
   /** Resolve the project root for a cwd from the freshest data available */
+
   const projectRootFor = useCallback((cwd: string | null): string | null => {
     if (!cwd) return null;
     if (worktreeState && worktreeState.forCwd === cwd) return worktreeState.projectRoot;

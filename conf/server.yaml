@@ -24,6 +24,9 @@ users:
   - id: zhouyuning666
     username: zhouyuning666
     accessCode: zhouyuning666
+  - id: tangyinxin666
+    username: tangyinxin666
+    accessCode: tangyinxin666
 
 workspaces:
   - id: demo
@@ -46,3 +49,7 @@ workspaces:
     name: Zhou Yuning Workspace
     rootPath: ./workspaces/zhouyuning666
     users: [zhouyuning666]
+  - id: tangyinxin666
+    name: Tang Yinxin Workspace
+    rootPath: ./workspaces/tangyinxin666
+    users: [tangyinxin666]
