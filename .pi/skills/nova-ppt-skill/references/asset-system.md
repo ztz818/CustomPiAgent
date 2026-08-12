@@ -6,6 +6,7 @@ Nova 的素材不是“可选装饰”，而是页面表达所使用的不同语
 
 - 先看 `templates/style-catalog.json`：决定全篇颜色、字体、圆角、阴影和默认图标家族。
 - 再看 `templates/layout-catalog.json`：决定标题区、视觉区、卡片区、流程区、时间线区和结论区的几何骨架。
+- 再看 `templates/component-catalog.json`：选择主视觉和支撑视觉的对象层级，不把所有关系退化成卡片。
 - 再看 `references/layout-patterns.md`：决定当前页面应该画成主张、三部分模型、流程、时间线、数据页还是决策页。
 - 再看 `references/visual-system.md`：决定字体角色、颜色角色和形状语言的细节。
 - 再看 `references/icon-system.md`：决定图标家族、图标尺寸、底形和图标与文字如何配合。
@@ -42,6 +43,7 @@ Nova 的素材不是“可选装饰”，而是页面表达所使用的不同语
 - `assets/icons/simple-icons/`：只放真实品牌标志，不作为通用图标库使用。
 - `templates/style-catalog.json`：风格主档，告诉 agent 一整套演示应该采用哪种色板、字体和图标家族。
 - `templates/layout-catalog.json`：版式骨架库，告诉 agent 各类页面的标准几何区块怎么摆。
+- `templates/component-catalog.json`：对象级组件库，告诉 agent 流程轴、指标焦点、对比轨、时间线和决策带由哪些层组成。
 
 ## 内置图标家族
 

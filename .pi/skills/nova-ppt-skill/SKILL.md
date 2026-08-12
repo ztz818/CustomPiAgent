@@ -1,6 +1,6 @@
 ---
 name: nova-ppt
-version: "0.3.0"
+version: "0.5.1"
 description: 从主题、文档、数据或参考演示稿端到端生成完整、美观、原生可编辑的 PPTX。适用于老板汇报、业务方案、产品提案、战略规划、培训课件、医疗健康、运营计划和视觉改版。
 ---
 
@@ -20,9 +20,11 @@ Nova 把源材料转化为结构完整、视觉统一、可以直接交付的原
 - 文件结构校验通过，版面问题经过检查，没有未处理错误。
 - 不编造事实；未知内容标为假设或直接省略。
 
+`lint`、`validate` 和 `view issues` 只证明规格或文件技术上可处理，不证明审美和叙事合格。视觉质量主要在设计计划、规格检查和人工审阅中控制；实际截图仅在环境已有可用渲染器时作为增强验证，不是默认交付阻塞项。
+
 ## 执行入口
 
-所有页面先写成 `deck-spec.json`，再由内置构建器生成：
+先按 [生成循环](references/generation-loop.md) 完成任务契约、内容计划、参考稿转译和视觉草图，再把已批准的设计写成 `deck-spec.json`，由内置构建器生成：
 
 ```bash
 if [ ! -d .venv ]; then
@@ -43,6 +45,8 @@ UV_CACHE_DIR=./uv_cache uv run python \
 ```
 
 ## 强制工作流
+
+完整执行流程见 [生成循环](references/generation-loop.md)。它是本技能的核心执行协议，不是可选的写作建议。尤其不能从源 Markdown 直接跳到 `deck-spec.json`；必须先完成任务契约、内容压缩、参考稿转译和每页视觉草图。
 
 ### 1. 明确沟通任务
 
@@ -69,7 +73,7 @@ UV_CACHE_DIR=./uv_cache uv run python \
 
 每页只承担一个沟通任务。页数服务于论证，不服务于模板配额。
 
-必读：[内容架构](references/content-architecture.md)。
+必读：[内容架构](references/content-architecture.md) 和 [生成循环](references/generation-loop.md)。
 
 ### 3. 锁定视觉系统
 
@@ -105,7 +109,7 @@ UV_CACHE_DIR=./uv_cache uv run python \
 硬性创作要求：
 
 - 每页先确定一个第一眼焦点，其他内容围绕它退居二级。
-- 每个内容页至少安排一种独立视觉语言：图标、流程线、节点、箭头、数据图形、原生表格、示意图或主题图片；不能让一页只有文字框和文字卡片。
+- 每个内容页至少安排一种独立视觉语言：图标、流程线、节点、箭头、数据图形、原生表格、示意图或主题图片；如果本页不需要图标，不得为了满足形式强行添加图标。
 - 图标必须承担语义，不是随机装饰。三项并列服务使用同一图标家族、同一尺寸、同一底形和同一对齐线。
 - 卡片只用于分组或承载重复结构。卡片外必须有页面级关系，例如主轴、路径、分区、对比标准或汇总结论。
 - 不要把所有信息均匀铺满画布。留出明显的视觉主次、空白和阅读方向。
@@ -121,7 +125,22 @@ UV_CACHE_DIR=./uv_cache uv run python \
 
 禁止整套演示全部做成同样大小的卡片墙。
 
-### 5. 准备素材
+### 5. 盘点并使用资产
+
+不要靠浏览目录或猜文件名选择资产。必读 [资产操作手册](references/asset-playbook.md)，并先执行：
+
+```bash
+UV_CACHE_DIR=./uv_cache uv run python \
+  .pi/skills/nova-ppt-skill/scripts/nova_ppt_cli.py catalog styles
+UV_CACHE_DIR=./uv_cache uv run python \
+  .pi/skills/nova-ppt-skill/scripts/nova_ppt_cli.py catalog layouts
+UV_CACHE_DIR=./uv_cache uv run python \
+  .pi/skills/nova-ppt-skill/scripts/nova_ppt_cli.py catalog components
+UV_CACHE_DIR=./uv_cache uv run python \
+  .pi/skills/nova-ppt-skill/scripts/nova_ppt_cli.py catalog icons
+UV_CACHE_DIR=./uv_cache uv run python \
+  .pi/skills/nova-ppt-skill/scripts/nova_ppt_cli.py catalog fonts
+```
 
 素材优先级：
 
@@ -131,19 +150,19 @@ UV_CACHE_DIR=./uv_cache uv run python \
 4. 主题确实需要真实视觉证据时使用生成图或来源明确的图片
 5. 只有能解决层级、聚焦或构图问题时才使用装饰效果
 
-素材要参与版式，不要在最后才贴图标。先为每页列出视觉对象清单：主视觉、结构线/节点、图标、数据表达、辅助标识；再把文字绑定到这些对象上。需要说明关系时优先用原生形状和连接线，需要说明概念时使用同一图标家族，需要说明真实场景时才使用图片。图标优先作为独立可替换对象导入，并配合圆形底、编号、状态色或连接线形成视觉系统。
+素材要参与版式，不要在最后才贴图标。先从组件目录选择一个主组件和最多两个支撑组件，再列出每页视觉对象：主视觉、结构线/节点、图标、数据表达、辅助标识；最后把文字绑定到这些对象上。需要说明关系时优先用原生形状和连接线，需要说明概念时使用统一的语义图标，需要说明真实场景时才使用图片。
 
-图标用于语义定位，不用于撒满页面。一套演示只使用一个通用图标家族，品牌标志除外。
+图标用于语义定位，不用于撒满页面。默认使用一个通用图标家族，明确的语义分工允许组合，品牌标志除外。
 
-必读：[素材系统](references/asset-system.md)。
+必读：[素材系统](references/asset-system.md)、[资产操作手册](references/asset-playbook.md) 和 [运行说明](references/usage.md)。
 
 ### 6. 先完成设计协议，再写页面规格
 
-必读 [设计协议](references/design-protocol.md)。先在规格中写全篇 `design` 和每页的 `layout_id`、`visual_job`、`visual_anchor`、`asset_plan`、`text_budget`，再写坐标和对象。
+必读 [设计协议](references/design-protocol.md) 和 [生成循环](references/generation-loop.md)。先完成任务契约、内容压缩、参考稿转译和视觉草图，再在规格中写全篇 `design` 和每页的 `layout_id`、`visual_job`、`visual_anchor`、`asset_plan`、`text_budget`，最后才写坐标和对象。
 
 如果提供参考 PPTX，必须先提取结构和视觉语法，记录参考页码和借鉴规则。不能只读取参考稿文本，也不能按标题、章节或产品数量机械拆页；页序必须由本次沟通目标决定。
 
-图标必须先用 CLI 检索真实文件：
+图标或图片只有在承担明确语义、证据或构图职责时才加入。需要通用图标时，必须先用 CLI 检索真实文件：
 
 ```bash
 UV_CACHE_DIR=./uv_cache uv run python \
@@ -151,7 +170,7 @@ UV_CACHE_DIR=./uv_cache uv run python \
   --family <icon-family> --query <semantic-keyword>
 ```
 
-`asset_plan.icons` 中列出的图标必须在 `elements` 中以 `type: "icon"` 出现；图标、主视觉、连接线和节点要在填入正文之前完成规划。
+`asset_plan.icons` 中列出的图标必须在 `elements` 中以 `type: "icon"` 出现；如果本页不需要图标，明确写空数组并说明主视觉由什么承担。图标、主视觉、连接线和节点要在填入正文之前完成规划。
 
 ### 7. 编写页面规格
 
@@ -171,9 +190,20 @@ UV_CACHE_DIR=./uv_cache uv run python \
 
 ### 8. 构建和检查
 
-先运行 `lint`，再运行 `build`。构建器会创建 PPTX、校验文件结构、扫描版面问题并输出统计信息。
+先运行 `lint`，修复所有错误；警告必须判断，但不要求为了“零警告”机械改形状或内容。再运行 `build`，完成内容、结构和技术检查，并根据设计计划复核视觉层级。
 
-渲染环境可用时逐页查看预览，检查：
+默认 QA 到此为止：`build` 已执行结构校验和版面问题检查，额外只需按任务需要读取 `text` 或 `stats`。实际截图属于可选增强，不是默认阻塞项。
+
+### 渲染执行预算
+
+- 只有本机已经存在可用渲染器时，才尝试实际截图。
+- 最多尝试一条已知可用的渲染链路；首次失败后立即停止并记录“视觉验证受限”。
+- 未经用户明确同意，禁止安装 Playwright、Chromium、浏览器、LibreOffice 扩展或其他截图依赖。
+- 禁止为了截图依次尝试 OfficeCLI、LibreOffice、SVG/FFmpeg、Playwright 等多条替代链路。
+- OfficeCLI SVG 中包含 `foreignObject` 文本时，FFmpeg 通常不能渲染文字；该输出只能用于结构检查，不能伪装成完整视觉截图。
+- 渲染失败不能阻止已经通过内容、结构和技术校验的 PPTX 交付；交付说明只需用一句话标记限制。
+
+渲染环境已确认可用且截图成本合理时，才逐页查看预览，检查：
 
 - 文字裁切或溢出
 - 无意义重叠
@@ -193,8 +223,9 @@ UV_CACHE_DIR=./uv_cache uv run python \
 
 - 最终 `.pptx`
 - `deck-spec.json`
+- 本次任务的设计计划或视觉草图记录
 - 生成的素材目录
-- 校验结果和仍存在的限制
+- 内容、结构、视觉、技术四层校验结果和仍存在的限制
 
 文件存在不等于任务完成。
 
@@ -206,6 +237,8 @@ UV_CACHE_DIR=./uv_cache uv run python \
 - 贴图标：在页面最后随机放几个图标，图标与内容、颜色、基线和阅读方向没有关系。
 - 视觉漂移：每页单独选颜色和组件，导致封面、内容页和结尾像不同模板。
 - 文字搬运：把报告段落缩小后塞进 PPT；应先提炼判断，再用图形承载关系，最后补充短句。
+- 把 lint 警告当作必须清零的指标，通过更换 `roundRect` / `ellipse` / `rect` 等名称机械绕过检测。
+- 为可选截图自动安装浏览器或大型依赖，或在同一次任务中连续尝试多条渲染链路。
 
 
 1. 沟通先于装饰。

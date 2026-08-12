@@ -1,0 +1,60 @@
+{
+  "components": [
+    {
+      "id": "section-anchor",
+      "use_when": ["内容页标题", "章节定位", "需要稳定跨页锚点"],
+      "avoid_when": ["沉浸式封面", "全画布图片页"],
+      "layers": ["accent-mark", "title", "optional-kicker"],
+      "quality_rules": ["标题与强调标记共享基线", "标题不放进卡片", "副标题与标题至少相差一个字号角色"]
+    },
+    {
+      "id": "semantic-node",
+      "use_when": ["类别", "步骤", "状态", "服务节点"],
+      "avoid_when": ["长段正文", "复杂数据"],
+      "layers": ["optional-backplate", "icon-or-symbol", "short-label", "optional-index"],
+      "quality_rules": ["图标和标签语义一致", "重复节点共享尺寸与对齐", "正文与节点分离"]
+    },
+    {
+      "id": "process-axis",
+      "use_when": ["先后顺序", "服务链路", "用户旅程", "闭环"],
+      "avoid_when": ["没有方向的并列分类"],
+      "layers": ["axis-or-connectors", "3-to-7-nodes", "stage-labels", "start-end-emphasis"],
+      "quality_rules": ["连接线位于节点下层", "起点和终点有视觉差异", "节点文字不承担整条流程解释"]
+    },
+    {
+      "id": "metric-focus",
+      "use_when": ["关键数字", "比例", "目标", "结果"],
+      "avoid_when": ["没有可比较口径的孤立数字"],
+      "layers": ["primary-value", "unit", "benchmark-or-context", "optional-data-mark"],
+      "quality_rules": ["数字是第一视觉层级", "单位不与数字同权", "提供基准、变化或定义"]
+    },
+    {
+      "id": "comparison-rail",
+      "use_when": ["选项对比", "前后变化", "两组差异", "多方案评价"],
+      "avoid_when": ["评价标准不一致"],
+      "layers": ["shared-criteria", "option-lanes", "difference-marks", "recommendation"],
+      "quality_rules": ["所有选项共享评价轴", "差异用位置、长度或状态表达", "推荐结论高于说明文字"]
+    },
+    {
+      "id": "timeline-band",
+      "use_when": ["阶段推进", "里程碑", "路线图", "试点节奏"],
+      "avoid_when": ["没有时间信息的普通流程"],
+      "layers": ["time-axis", "phase-blocks", "milestones", "deliverables"],
+      "quality_rules": ["时间尺度一致", "阶段和里程碑有不同形态", "最终交付物得到强调"]
+    },
+    {
+      "id": "evidence-strip",
+      "use_when": ["支撑主张的三到五项证据", "共同原则", "验收标准"],
+      "avoid_when": ["证据之间存在复杂因果"],
+      "layers": ["strip-label", "numbered-evidence", "short-explanation"],
+      "quality_rules": ["证据为次级层，不争夺主视觉", "每项只保留一个判断", "编号、标题和说明分别成对象"]
+    },
+    {
+      "id": "decision-band",
+      "use_when": ["建议", "决策请求", "下一步", "风险边界"],
+      "avoid_when": ["普通背景信息"],
+      "layers": ["decision-statement", "basis", "action", "owner-or-timing"],
+      "quality_rules": ["决策句完整且醒目", "行动具有动词", "风险和边界不与主决策同权"]
+    }
+  ]
+}

@@ -10,12 +10,16 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 ICON_ROOT = SKILL_ROOT / "assets" / "icons"
+STYLE_CATALOG = SKILL_ROOT / "templates" / "style-catalog.json"
+LAYOUT_CATALOG = SKILL_ROOT / "templates" / "layout-catalog.json"
+COMPONENT_CATALOG = SKILL_ROOT / "templates" / "component-catalog.json"
 CANVAS_WIDTH_PT = 960.0
 CANVAS_HEIGHT_PT = 540.0
 PASS_TYPES = {
@@ -72,6 +76,54 @@ def normalize_hex(value: str) -> str:
     return color.upper()
 
 
+def matched_font_family(font_name: str) -> str | None:
+    if shutil.which("fc-match") is None:
+        return None
+    result = subprocess.run(
+        ["fc-match", "-f", "%{family}", font_name],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout.strip() or None
+
+
+def font_is_available(font_name: str) -> tuple[bool, str | None]:
+    matched = matched_font_family(font_name)
+    if matched is None:
+        return True, None
+    families = [item.strip().lower() for item in matched.split(",")]
+    requested = font_name.strip().lower()
+    return requested in families, matched
+
+
+def style_token_map(spec: dict[str, Any]) -> dict[str, str]:
+    style_id = str(spec.get("design", {}).get("style_id", ""))
+    if not style_id or style_id.startswith("custom:"):
+        return {}
+    catalog = json.loads(STYLE_CATALOG.read_text(encoding="utf-8"))
+    style = next((item for item in catalog.get("styles", []) if item.get("id") == style_id), None)
+    if style is None:
+        return {}
+    tokens: dict[str, str] = {}
+    for key, value in style.get("colors", {}).items():
+        tokens[f"${key}"] = str(value)
+        tokens[f"$color.{key}"] = str(value)
+    for key, value in style.get("fonts", {}).items():
+        tokens[f"$font.{key}"] = str(value)
+    return tokens
+
+
+def resolve_tokens(value: Any, tokens: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        return tokens.get(value, value)
+    if isinstance(value, list):
+        return [resolve_tokens(item, tokens) for item in value]
+    if isinstance(value, dict):
+        return {key: resolve_tokens(item, tokens) for key, item in value.items()}
+    return value
+
+
 def resolve_asset(value: str, spec_dir: Path) -> str:
     if re.match(r"^(https?://|data:)", value):
         return value
@@ -116,16 +168,46 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
         findings.append(Finding("error", "canvas", "当前构建器要求 16:9 画布"))
 
     generic_icon_families: set[str] = set()
+    requested_fonts: set[str] = set()
     slide_names: set[str] = set()
+
+    plan = spec.get("plan")
+    if not isinstance(plan, dict):
+        findings.append(Finding("error", "plan", "缺少任务契约、页序理由和资产决策；不要从源材料直接跳到坐标"))
+    else:
+        task_contract = plan.get("task_contract")
+        if not isinstance(task_contract, dict):
+            findings.append(Finding("error", "plan.task_contract", "缺少任务契约"))
+        else:
+            for key in ("delivery_mode", "desired_outcome", "content_scope"):
+                if not task_contract.get(key):
+                    findings.append(Finding("error", f"plan.task_contract.{key}", "缺少任务决定"))
+        if not plan.get("narrative_rationale"):
+            findings.append(Finding("error", "plan.narrative_rationale", "缺少页序和叙事选择理由"))
+        if not plan.get("asset_decisions"):
+            findings.append(Finding("error", "plan.asset_decisions", "缺少风格、布局、图标/图片和原生对象的使用决定"))
 
     design = spec.get("design")
     if not isinstance(design, dict):
-        findings.append(Finding("warning", "design", "缺少全篇设计协议：style_id、grid 和项目级构图规则"))
+        findings.append(Finding("error", "design", "缺少全篇设计协议：style_id、grid 和项目级构图规则"))
     else:
         for key in ("style_id", "grid"):
             if not design.get(key):
-                findings.append(Finding("warning", f"design.{key}", "缺少全篇设计决定"))
+                findings.append(Finding("error", f"design.{key}", "缺少全篇设计决定"))
+        style_id = str(design.get("style_id", ""))
+        if style_id and not style_id.startswith("custom:"):
+            catalog = json.loads(STYLE_CATALOG.read_text(encoding="utf-8"))
+            known_styles = {item.get("id") for item in catalog.get("styles", [])}
+            if style_id not in known_styles:
+                findings.append(Finding("error", "design.style_id", f"未知风格 ID：{style_id}；使用 catalog styles 查询或 custom:<name>"))
+        if design.get("reference_deck"):
+            reference_decisions = plan.get("reference_decisions") if isinstance(plan, dict) else None
+            if not isinstance(reference_decisions, dict) or not reference_decisions.get("borrow") or not reference_decisions.get("avoid"):
+                findings.append(Finding("error", "plan.reference_decisions", "使用参考稿时必须记录借鉴项和拒绝照抄项"))
+            if not design.get("reference_slides") or not design.get("reference_grammar"):
+                findings.append(Finding("error", "design.reference_grammar", "使用参考稿时必须指定样本页并提取可执行视觉语法"))
 
+    tokens = style_token_map(spec)
     for slide_index, slide in enumerate(slides, start=1):
         location = f"slide[{slide_index}]"
         if not isinstance(slide, dict):
@@ -139,12 +221,12 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
         else:
             slide_names.add(slide_name)
         if not slide.get("role"):
-            findings.append(Finding("warning", location, "缺少页面角色 role"))
+            findings.append(Finding("error", location, "缺少页面角色 role"))
         if not slide.get("message"):
-            findings.append(Finding("warning", location, "缺少单页结论 message"))
-        for design_key in ("layout_id", "visual_job", "visual_anchor", "asset_plan"):
+            findings.append(Finding("error", location, "缺少单页结论 message"))
+        for design_key in ("layout_id", "density", "visual_job", "visual_anchor", "asset_plan", "text_budget"):
             if not slide.get(design_key):
-                findings.append(Finding("warning", f"{location}.{design_key}", "缺少页面设计决定"))
+                findings.append(Finding("error", f"{location}.{design_key}", "缺少页面设计决定"))
 
         elements = slide.get("elements", [])
         if not isinstance(elements, list):
@@ -156,6 +238,12 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
         object_names: set[str] = set()
         has_title_signal = False
         actual_icons: set[str] = set()
+        font_sizes: set[float] = set()
+        text_blocks = 0
+        total_characters = 0
+        structural_visuals = 0
+        relationship_visuals = 0
+        repeated_text_containers: list[tuple[str, str]] = []
         for element_index, element in enumerate(elements, start=1):
             element_location = f"{location}.elements[{element_index}]"
             if not isinstance(element, dict):
@@ -165,10 +253,11 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
             if element_type not in PASS_TYPES | {"icon"}:
                 findings.append(Finding("error", element_location, f"不支持的元素类型：{element_type}"))
                 continue
-            props = element.get("props", {})
-            if not isinstance(props, dict):
+            raw_props = element.get("props", {})
+            if not isinstance(raw_props, dict):
                 findings.append(Finding("error", element_location, "props 必须是对象"))
                 continue
+            props = resolve_tokens(raw_props, tokens)
             if "padding" in props:
                 findings.append(Finding("error", element_location, "文字内边距使用 margin，不使用 padding"))
             name = props.get("name")
@@ -200,7 +289,7 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
                 if not props.get("alt"):
                     findings.append(Finding("warning", element_location, "图标缺少替代文本 alt"))
                 try:
-                    normalize_hex(str(element.get("color", "262626")))
+                    normalize_hex(str(resolve_tokens(element.get("color", "$text"), tokens)))
                 except ValueError as exc:
                     findings.append(Finding("error", element_location, str(exc)))
 
@@ -215,7 +304,29 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
                 if not props.get("alt"):
                     findings.append(Finding("warning", element_location, "图片缺少替代文本 alt"))
 
+            font_name = props.get("font")
+            if isinstance(font_name, str) and font_name.strip():
+                requested_fonts.add(font_name.strip())
+
+            text_value = props.get("text")
+            if isinstance(text_value, str) and text_value.strip():
+                text_blocks += 1
+                total_characters += len(text_value.replace("\n", ""))
+            if element_type in {"icon", "picture", "chart", "table", "connector"}:
+                structural_visuals += 1
+                relationship_visuals += 1
+            if element_type == "shape":
+                geometry = str(props.get("preset") or props.get("geometry") or "rect").lower()
+                if geometry in {"rect", "roundrect"} and text_value:
+                    repeated_text_containers.append((str(props.get("width", "")), str(props.get("height", ""))))
+                if any(token in geometry for token in ("arrow", "chevron", "line")):
+                    relationship_visuals += 1
+                if not text_value:
+                    structural_visuals += 1
+
             size = length_to_pt(props.get("size"))
+            if size is not None:
+                font_sizes.add(size)
             if size is not None and size < 8:
                 findings.append(Finding("warning", element_location, f"字号较小：{size:g}pt"))
 
@@ -229,6 +340,23 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
                 if x < -0.5 or y < -0.5 or x + element_width > CANVAS_WIDTH_PT + 0.5 or y + element_height > CANVAS_HEIGHT_PT + 0.5:
                     findings.append(Finding("error", element_location, "对象越出 960×540pt 画布"))
 
+        text_budget = slide.get("text_budget")
+        if isinstance(text_budget, dict):
+            max_blocks = text_budget.get("max_text_blocks")
+            if isinstance(max_blocks, int) and text_blocks > max_blocks:
+                findings.append(Finding("warning", location, f"实际文本块 {text_blocks} 个，超过预算 {max_blocks} 个"))
+        if text_blocks >= 6 and len(font_sizes) < 3:
+            findings.append(Finding("warning", location, "文字较多但字号层级少于 3 级，检查标题、结论、证据和脚注的视觉层级"))
+        if structural_visuals == 0 and slide.get("role") not in {"cover", "section", "closing"}:
+            findings.append(Finding("warning", location, "没有结构性视觉对象；检查页面是否退化为纯文字"))
+        repeated_container_count = max((repeated_text_containers.count(size) for size in set(repeated_text_containers)), default=0)
+        if len(repeated_text_containers) >= 4 and repeated_container_count >= 3 and relationship_visuals == 0:
+            findings.append(Finding("warning", location, "存在至少 3 个同尺寸矩形文字容器；检查它们是否真正表达并列关系，而不是卡片墙"))
+        density = slide.get("density")
+        density_limits = {"low": 220, "medium": 420, "high": 700}
+        if density in density_limits and total_characters > density_limits[density]:
+            findings.append(Finding("warning", location, f"页面约 {total_characters} 字，超过 {density} 密度建议上限 {density_limits[density]}"))
+
         asset_plan = slide.get("asset_plan")
         planned_icons = set(asset_plan.get("icons", [])) if isinstance(asset_plan, dict) and isinstance(asset_plan.get("icons", []), list) else set()
         missing_planned_icons = planned_icons - actual_icons
@@ -240,23 +368,29 @@ def lint_spec(spec: dict[str, Any], spec_path: Path) -> list[Finding]:
 
     if len(generic_icon_families) > 1:
         findings.append(Finding("warning", "icons", f"混用了多个通用图标家族：{', '.join(sorted(generic_icon_families))}"))
+    for font_name in sorted(requested_fonts):
+        available, matched = font_is_available(font_name)
+        if not available:
+            findings.append(Finding("warning", "fonts", f"本机未找到字体 {font_name}，预览可能回退为 {matched}；确认目标环境或更换字体"))
     return findings
 
 
 def compile_commands(spec: dict[str, Any], spec_path: Path, asset_dir: Path) -> list[dict[str, Any]]:
     commands: list[dict[str, Any]] = []
+    tokens = style_token_map(spec)
     for slide_index, slide in enumerate(spec["slides"], start=1):
         slide_props: dict[str, Any] = {"name": slide["name"]}
         for key in ("background", "transition", "advanceTime", "advanceClick", "hidden"):
             if key in slide:
-                slide_props[key] = slide[key]
+                slide_props[key] = resolve_tokens(slide[key], tokens)
         commands.append({"command": "add", "parent": "/", "type": "slide", "props": slide_props})
 
         for element in slide.get("elements", []):
             element_type = element["type"]
-            props = dict(element.get("props", {}))
+            props = resolve_tokens(dict(element.get("props", {})), tokens)
             if element_type == "icon":
-                icon_file = materialize_icon(element["icon"], str(element.get("color", "262626")), asset_dir)
+                icon_color = resolve_tokens(str(element.get("color", "$text")), tokens)
+                icon_file = materialize_icon(element["icon"], str(icon_color), asset_dir)
                 props["src"] = str(icon_file.resolve())
                 commands.append({"command": "add", "parent": f"/slide[{slide_index}]", "type": "picture", "props": props})
                 continue
@@ -274,6 +408,43 @@ def compile_commands(spec: dict[str, Any], spec_path: Path, asset_dir: Path) -> 
                 "props": {"text": slide["notes"]},
             })
     return commands
+
+
+def repair_svg_fallbacks(pptx_path: Path, asset_dir: Path) -> int:
+    if shutil.which("ffmpeg") is None:
+        return 0
+    fallback_dir = asset_dir / "svg_fallbacks"
+    fallback_dir.mkdir(parents=True, exist_ok=True)
+    replacements: dict[str, bytes] = {}
+    with zipfile.ZipFile(pptx_path, "r") as package:
+        names = set(package.namelist())
+        svg_names = sorted(name for name in names if name.startswith("ppt/media/") and name.endswith(".svg"))
+        for index, svg_name in enumerate(svg_names, start=1):
+            png_name = f"{svg_name[:-4]}.png"
+            if png_name not in names:
+                continue
+            svg_file = fallback_dir / f"icon-{index:03d}.svg"
+            png_file = fallback_dir / f"icon-{index:03d}.png"
+            svg_file.write_bytes(package.read(svg_name))
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error", "-i", str(svg_file),
+                    "-frames:v", "1", "-vf", "scale=256:256:flags=lanczos", str(png_file),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            if result.returncode == 0 and png_file.is_file() and png_file.stat().st_size > 100:
+                replacements[png_name] = png_file.read_bytes()
+
+        if not replacements:
+            return 0
+        repacked = asset_dir / f"{pptx_path.stem}.repacked.pptx"
+        with zipfile.ZipFile(repacked, "w") as target:
+            for info in package.infolist():
+                target.writestr(info, replacements.get(info.filename, package.read(info.filename)))
+    repacked.replace(pptx_path)
+    return len(replacements)
 
 
 def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedProcess[str]:
@@ -294,6 +465,54 @@ def print_findings(findings: list[Finding]) -> None:
 def ensure_runtime() -> None:
     if shutil.which("officecli") is None:
         raise RuntimeError("未找到 PPTX 构建运行时，请确认 officecli 可执行文件位于 PATH")
+
+
+def command_catalog(args: argparse.Namespace) -> int:
+    if args.kind == "components":
+        data = json.loads(COMPONENT_CATALOG.read_text(encoding="utf-8"))
+        for item in data.get("components", []):
+            uses = "、".join(item.get("use_when", []))
+            layers = " → ".join(item.get("layers", []))
+            print(f"{item.get('id')} | 适用：{uses} | 对象层：{layers}")
+        return 0
+
+    if args.kind == "fonts":
+        data = json.loads(STYLE_CATALOG.read_text(encoding="utf-8"))
+        fonts = sorted({font for item in data.get("styles", []) for font in item.get("fonts", {}).values()})
+        for font_name in fonts:
+            available, matched = font_is_available(font_name)
+            status = "available" if available else "fallback"
+            print(f"{font_name} | {status} | 本机匹配：{matched or '无法检查'}")
+        return 0
+
+    if args.kind == "styles":
+        data = json.loads(STYLE_CATALOG.read_text(encoding="utf-8"))
+        for item in data.get("styles", []):
+            uses = "、".join(item.get("use_for", []))
+            colors = item.get("colors", {})
+            fonts = item.get("fonts", {})
+            print(
+                f"{item.get('id')} | {item.get('name')} | 适用：{uses} | "
+                f"强调色：#{colors.get('accent', '')} | "
+                f"标题/正文：{fonts.get('title', '')}/{fonts.get('body', '')} | "
+                f"图标：{item.get('icon_family', '')}"
+            )
+        return 0
+
+    if args.kind == "layouts":
+        data = json.loads(LAYOUT_CATALOG.read_text(encoding="utf-8"))
+        for item in data.get("layouts", []):
+            regions = "、".join(item.get("regions", {}).keys())
+            print(
+                f"{item.get('id')} | 角色：{item.get('role')} | "
+                f"密度：{item.get('density')} | 区域：{regions}"
+            )
+        return 0
+
+    for family_dir in sorted(path for path in ICON_ROOT.iterdir() if path.is_dir()):
+        count = sum(1 for _ in family_dir.glob("*.svg"))
+        print(f"{family_dir.name} | {count} 个 SVG")
+    return 0
 
 
 def command_icons(args: argparse.Namespace) -> int:
@@ -364,6 +583,8 @@ def command_build(args: argparse.Namespace) -> int:
     try:
         run(["officecli", "create", str(output), "--type", "pptx", "--locale", language, "--force"])
         run(["officecli", "batch", str(output), "--input", str(command_file), "--stop-on-error"])
+        subprocess.run(["officecli", "close", str(output)], text=True, capture_output=True)
+        repaired_fallbacks = repair_svg_fallbacks(output, asset_dir)
         validation = run(["officecli", "validate", str(output)], capture=True)
         issues = run(["officecli", "view", str(output), "issues"], capture=True)
         stats = run(["officecli", "view", str(output), "stats"], capture=True)
@@ -378,6 +599,8 @@ def command_build(args: argparse.Namespace) -> int:
         subprocess.run(["officecli", "close", str(output)], text=True, capture_output=True)
 
     print(validation.stdout.strip())
+    if repaired_fallbacks:
+        print(f"已修复 {repaired_fallbacks} 个 SVG 图标的 PNG 兼容预览，矢量 SVG 保持不变")
     print(issues.stdout.strip())
     print(stats.stdout.strip())
     match = re.search(r"Found\s+(\d+)\s+issue", issues.stdout)
@@ -393,6 +616,10 @@ def command_build(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Nova PPT 原生演示稿构建器")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    catalog_parser = subparsers.add_parser("catalog", help="查看风格、布局或图标家族目录")
+    catalog_parser.add_argument("kind", choices=["styles", "layouts", "components", "icons", "fonts"])
+    catalog_parser.set_defaults(handler=command_catalog)
 
     icons_parser = subparsers.add_parser("icons", help="检索本地 SVG 图标资产")
     icons_parser.add_argument("--query", required=True, help="文件名关键词，例如 shield、walk、calendar")

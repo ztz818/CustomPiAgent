@@ -13,6 +13,25 @@
     "core_message": "方案已具备小规模验证条件",
     "language": "zh-CN"
   },
+  "plan": {
+    "task_contract": {
+      "delivery_mode": "现场讲解",
+      "desired_outcome": "推动试点决策",
+      "content_scope": "仅使用已确认的方案事实",
+      "constraints": ["16:9", "原生可编辑"],
+      "assumptions": []
+    },
+    "narrative_rationale": "先建立判断，再给证据和行动；不按源文档章节机械切页",
+    "reference_decisions": {
+      "borrow": ["标题锚点", "色彩角色", "对象层级"],
+      "avoid": ["照抄参考稿内容结构"]
+    },
+    "asset_decisions": [
+      "从风格目录选择视觉起点，并逐项落实颜色和字体角色",
+      "布局目录只提供区域起点，页面关系按内容调整",
+      "图标只绑定语义节点，关系和数据使用原生对象"
+    ]
+  },
   "design": {
     "style_id": "warm-executive",
     "grid": "8pt",
@@ -29,7 +48,16 @@
 
 当前构建器使用 16:9 画布，坐标建议统一使用 `pt`。
 
+`plan` 记录进入坐标实现前已经完成的任务、叙事、参考稿和资产决策。它的作用是约束执行路径，不规定固定页序。`asset_decisions` 必须写明风格、布局、图标/图片和原生对象如何使用，不能只列资产 ID。详细流程见 [生成循环](generation-loop.md) 和 [资产操作手册](asset-playbook.md)。
+
 `design` 负责全篇设计决定；如果没有参考稿，省略 `reference_*` 字段。没有使用通用图标时可以省略 `icon_family`。`style_id` 和页面 `layout_id` 都可以使用 `custom:<name>`，目录中的风格和布局只是起点。
+
+使用内置风格时，可以在颜色、字体和页面背景属性中引用设计 token：
+
+- 颜色：`$background`、`$text`、`$muted`、`$accent`、`$accent_soft`、`$surface`、`$border`
+- 字体：`$font.title`、`$font.body`、`$font.data`
+
+构建器根据 `design.style_id` 解析 token。这样风格目录会真正落实到对象，而不是只保留一个没有执行效果的 ID。自定义风格使用明确值。
 
 ## 页面设计层
 
@@ -137,7 +165,7 @@ UV_CACHE_DIR=./uv_cache uv run python \
 
 `asset_plan.icons` 中的每个图标都应该在 `elements` 中有对应对象。图标必须与圆底、编号、节点、标题或连接线形成版式关系，不能在页面最后随机添加。
 
-构建器会把 SVG 复制、换色并嵌入 PPTX。它保持矢量清晰度和独立替换能力，但通常作为 SVG 图片对象存在；如果要求像参考稿一样达到路径级编辑，应使用原生形状或 raw XML 自定义几何补充。
+构建器会把 SVG 复制、换色并嵌入 PPTX，同时为 SVG 生成真实 PNG 兼容预览。PowerPoint 保留矢量 SVG，结构预览和不支持 SVG 的软件使用 PNG fallback。图标保持独立替换能力，但通常仍是 SVG 图片对象；如果要求路径级编辑，需要另行使用原生自定义几何。
 
 ## 备注
 

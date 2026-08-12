@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Nova PPT Deck Specification",
   "type": "object",
-  "required": ["meta", "design", "slides"],
+  "required": ["meta", "plan", "design", "slides"],
   "additionalProperties": false,
   "properties": {
     "meta": {
@@ -16,6 +16,40 @@
         "language": {"type": "string", "default": "zh-CN"}
       },
       "additionalProperties": true
+    },
+    "plan": {
+      "type": "object",
+      "required": ["task_contract", "narrative_rationale", "asset_decisions"],
+      "properties": {
+        "task_contract": {
+          "type": "object",
+          "required": ["delivery_mode", "desired_outcome", "content_scope"],
+          "properties": {
+            "delivery_mode": {"type": "string", "minLength": 1},
+            "desired_outcome": {"type": "string", "minLength": 1},
+            "content_scope": {"type": "string", "minLength": 1},
+            "constraints": {"type": "array", "items": {"type": "string"}},
+            "assumptions": {"type": "array", "items": {"type": "string"}}
+          },
+          "additionalProperties": false
+        },
+        "narrative_rationale": {"type": "string", "minLength": 1},
+        "reference_decisions": {
+          "type": "object",
+          "required": ["borrow", "avoid"],
+          "properties": {
+            "borrow": {"type": "array", "items": {"type": "string"}},
+            "avoid": {"type": "array", "items": {"type": "string"}}
+          },
+          "additionalProperties": false
+        },
+        "asset_decisions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
     },
     "design": {
       "type": "object",
@@ -49,7 +83,7 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "role", "message", "layout_id", "visual_job", "visual_anchor", "asset_plan", "elements"],
+        "required": ["name", "role", "message", "layout_id", "density", "visual_job", "visual_anchor", "asset_plan", "text_budget", "elements"],
         "properties": {
           "name": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
           "role": {"type": "string", "minLength": 1},

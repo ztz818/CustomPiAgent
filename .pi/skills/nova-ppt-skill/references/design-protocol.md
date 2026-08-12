@@ -34,7 +34,7 @@ officecli view <reference.pptx> annotated --start 1 --end 6 --max-lines 300
 - `density`：低、中、高密度。
 - `visual_job`：这页需要让受众看懂什么关系。
 - `visual_anchor`：第一眼焦点是什么。
-- `asset_plan`：要使用的原生图形、图标、图片和重复视觉母题。
+- `asset_plan`：要使用的原生图形、图标、图片和重复视觉母题；不需要的资产写空数组，并说明主视觉由什么承担。
 - `text_budget`：标题长度、正文行数和文本块数量上限。
 
 没有这些设计决定时，不要直接写坐标。
@@ -64,7 +64,7 @@ UV_CACHE_DIR=./uv_cache uv run python \
   --family tabler-filled --query shield
 ```
 
-只使用检索结果中的完整图标 ID。每个计划中的图标都必须在 `elements` 中出现对应的 `type: icon`，不能用圆形、编号或文字代替。
+只使用检索结果中的完整图标 ID。计划使用的图标必须在 `elements` 中出现对应的 `type: icon`；如果页面不需要图标，使用空数组，不要为了满足形式添加图标。图标不能替代页面级主视觉和关系结构。
 
 ## 5. 从设计层落到对象层
 
@@ -84,7 +84,7 @@ UV_CACHE_DIR=./uv_cache uv run python \
 
 - 删除所有正文，页面是否仍能看出结构和阅读方向？
 - 第一眼焦点是否只有一个？
-- `asset_plan.icons` 是否真的变成了 `type: icon`？
+- 图标或图片是否承担明确语义、证据或构图职责，而不是仅仅存在？
 - 跨页构图是否有必要的变化，同时仍保留当前项目需要的一致性？
 - 是否有页面同时承担两个以上主要任务？
 
